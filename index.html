@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
 <style>
-/* Layout: painel de loja em abas — Resumo, Pedidos, Lotes, Clientes, Despesas, Acerto, Relatórios, Interessados, Ajustes — com cabeçalho fixo e botão flutuante */
+/* Layout: painel de loja em abas — Resumo, Pedidos, Lotes, Clientes, Despesas, Relatórios, Interessados, Ajustes — com cabeçalho fixo e botão flutuante */
 :root{
   --bg:#0c0d0b; --panel:#151713; --panel-2:#1d201a; --line:#2c3027;
   --fg:#eef2e6; --muted:#9aa18f; --accent:#a6e600; --on-accent:#0c0d0b;
@@ -185,7 +185,6 @@ table.edit input{background:var(--bg);border:1px solid var(--line);border-radius
       <button role="tab" data-v="lotes">Lotes<span class="cnt" id="c-lot"></span></button>
       <button role="tab" data-v="clientes">Clientes</button>
       <button role="tab" data-v="despesas">Despesas</button>
-      <button role="tab" data-v="acerto">Acerto</button>
       <button role="tab" data-v="relatorios">Relatórios</button>
       <button role="tab" data-v="interessados">Interessados<span class="cnt" id="c-int"></span></button>
       <button role="tab" data-v="ajustes">Ajustes</button>
@@ -208,7 +207,6 @@ table.edit input{background:var(--bg);border:1px solid var(--line);border-radius
   <section class="view" id="v-lotes" hidden></section>
   <section class="view" id="v-clientes" hidden></section>
   <section class="view" id="v-despesas" hidden></section>
-  <section class="view" id="v-acerto" hidden></section>
   <section class="view" id="v-relatorios" hidden></section>
   <section class="view" id="v-interessados" hidden></section>
   <section class="view" id="v-ajustes" hidden></section>
@@ -251,7 +249,6 @@ const PADRAO = {
   prazo:{confeccao:7, uteis:20},
   diasAviso:5,
   meta:0,
-  socios:[{nome:"",pct:50},{nome:"",pct:50}],
   fidelidade:{camisas:5, premio:"Nome e número grátis"}
 };
 let CFG = JSON.parse(JSON.stringify(PADRAO));
@@ -263,7 +260,6 @@ function aplicarConfig(c){
     Object.keys(base.extras).forEach(k=>{ if(c.extras&&c.extras[k]) Object.assign(base.extras[k],c.extras[k]); });
     ["prazo","fidelidade"].forEach(k=>{ if(c[k]) Object.assign(base[k],c[k]); });
     ["diasAviso","meta"].forEach(k=>{ if(typeof c[k]==="number") base[k]=c[k]; });
-    if(Array.isArray(c.socios)) base.socios=[0,1].map(i=>({...base.socios[i],...(c.socios[i]||{})}));
   }
   CFG=base; TIPOS=CFG.tipos; EXTRAS=CFG.extras;
 }
@@ -295,7 +291,6 @@ const mesAtual = () => hoje().slice(0,7);
 function nomeDoMes(mes){ const [y,m]=mes.split("-").map(Number); const n=new Date(y,m-1,1).toLocaleDateString("pt-BR",{month:"long",year:y!==new Date().getFullYear()?"numeric":undefined}); return n[0].toUpperCase()+n.slice(1); }
 function addUteis(d, n){ const x=new Date(d); while(n>0){ x.setDate(x.getDate()+1); const w=x.getDay(); if(w!==0&&w!==6) n--; } return x; }
 function previsao(dataEnc){ if(!dataEnc) return null; const d=parseD(dataEnc); d.setDate(d.getDate()+(CFG.prazo.confeccao||0)); return isoD(addUteis(d,CFG.prazo.uteis||0)); }
-const nomesSocios = () => CFG.socios.map((s,i)=>s.nome||("Sócio "+(i+1)));
 
 /* ===== cálculo de preço, custo e pagamento ===== */
 function custoUnit(tipo, qtd){ const c=(TIPOS[tipo]||TIPOS.torcedor).custos; return c[Math.min(Math.max(qtd,1),c.length)-1]; }
@@ -311,7 +306,7 @@ const precoItem = it => precoPeca(it)*(it.qtd||1);
 const tabelaPedido = p => itensDe(p).reduce((a,it)=>a+precoItem(it),0);
 /* valor: pedidos antigos guardavam o valor final; os novos guardam o desconto */
 const valorPedido = p => typeof p.valor==="number" ? p.valor : Math.max(0, tabelaPedido(p)-(p.desconto||0));
-const descontoDe = p => typeof p.valor==="number" ? Math.max(0,tabelaPedido(p)-p.valor) : (p.desconto||0);
+const descontoDe = p => typeof p.valor==="number" ? Math.max(0,tabelaPedido(p)-p.valor) : Math.max(0,p.desconto||0);
 /* custo: travado quando o lote fecha; antes disso, estimado como peça avulsa (pior caso) */
 const custoItem = it => ((typeof it.custoUnit==="number"?it.custoUnit:custoUnit(it.tipo,1))+custoExtras(it))*(it.qtd||1);
 const custoPedido = p => itensDe(p).reduce((a,it)=>a+custoItem(it),0);
@@ -326,11 +321,11 @@ const faltaDe = p => p.status==="cancelado" ? 0 : Math.max(0, r2(valorPedido(p)-
 const vendido = p => ativo(p) && (pagoOuDepois(p) || recebidoDe(p)>0);
 function pagamentosDe(p){
   if(Array.isArray(p.pagamentos)) return p.pagamentos;
-  return pagoOuDepois(p) ? [{valor:valorPedido(p),data:p.dataPedido,forma:"",quem:null,antigo:true}] : [];
+  return pagoOuDepois(p) ? [{valor:valorPedido(p),data:p.dataPedido,forma:"",antigo:true}] : [];
 }
 
 /* ===== estado e banco ===== */
-const S = {pedidos:[], interessados:[], lotes:[], despesas:[], clientes:[], ready:{}, view:"resumo", filtro:"ativos", busca:"", buscaCli:"", mes:null, acertoTudo:false};
+const S = {pedidos:[], interessados:[], lotes:[], despesas:[], clientes:[], ready:{}, view:"resumo", filtro:"ativos", busca:"", buscaCli:"", mes:null};
 let USER="";
 
 function toast(msg){ const t=$("#toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true,2800); }
@@ -386,12 +381,12 @@ onAuthStateChanged(auth, user=>{
 });
 
 /* ===== navegação ===== */
-const VIEWS=["resumo","pedidos","lotes","clientes","despesas","acerto","relatorios","interessados","ajustes"];
+const VIEWS=["resumo","pedidos","lotes","clientes","despesas","relatorios","interessados","ajustes"];
 $("#tabs").addEventListener("click", e=>{ const b=e.target.closest("button[data-v]"); if(!b) return; irPara(b.dataset.v); });
 function ajustarFab(){
   const v=S.view, f=$("#fab");
   f.textContent = v==="interessados" ? "+ Interessado" : v==="despesas" ? "+ Despesa" : "+ Pedido";
-  f.hidden = !DB || ["clientes","acerto","relatorios","ajustes"].includes(v);
+  f.hidden = !DB || ["clientes","relatorios","ajustes"].includes(v);
 }
 function irPara(v){
   S.view=v;
@@ -420,7 +415,7 @@ function render(){
   $("#c-ped").textContent = S.pedidos.filter(p=>!["entregue","cancelado"].includes(p.status)).length||"";
   $("#c-lot").textContent = filaLote().length||"";
   $("#c-int").textContent = S.interessados.filter(i=>i.situacao==="aberto").length||"";
-  ({resumo:rResumo,pedidos:rPedidos,lotes:rLotes,clientes:rClientes,despesas:rDespesas,acerto:rAcerto,relatorios:rRelatorios,interessados:rInteressados,ajustes:rAjustes})[S.view]();
+  ({resumo:rResumo,pedidos:rPedidos,lotes:rLotes,clientes:rClientes,despesas:rDespesas,relatorios:rRelatorios,interessados:rInteressados,ajustes:rAjustes})[S.view]();
 }
 
 /* ----- Resumo ----- */
@@ -547,17 +542,16 @@ function rLoteFeito(l){
   const fim=peds.length&&peds.every(p=>["recebido","entregue","cancelado"].includes(p.status));
   const chegada=peds.map(p=>p.dataChegada).filter(Boolean).sort()[0];
   return `<div class="row"><div class="main"><div class="t">Lote de ${fmtD(l.data)}</div>
-    <div class="d">${l.pecas} peças · custo ${brl(l.custo)} · lucro ${brl(l.lucro)}${l.pagoPor!=null?" · pago por "+esc(nomesSocios()[l.pagoPor]||"—"):""}</div>
+    <div class="d">${l.pecas} peças · custo ${brl(l.custo)} · lucro ${brl(l.lucro)}</div>
     <div class="d">${fim?`Chegou${chegada?" em "+fmtD(chegada)+" ("+diasEntre(l.data,chegada)+" dias)":""}`:"Previsão de chegada: até "+fmtD(previsao(l.data))}</div></div>
     <div class="r">${fim?`<span class="pill s-recebido">Chegou</span>`:`<button class="btn sm" data-chegou="${l.id}">Marcar como chegou</button>`}</div>
-    ${l.pagoPor==null?`<div class="acts"><span class="small muted">Quem pagou o fornecedor?</span>${nomesSocios().map((n,i)=>`<button class="btn sm" data-lotepago="${l.id}" data-quem="${i}">${esc(n)}</button>`).join("")}</div>`:""}</div>`;
+</div>`;
 }
 async function fecharLote(btn){
-  const quem=$("#lote-quem")?Number($("#lote-quem").value):null;
   btn.disabled=true;
   const fila=filaLote(), r=resumoLote(fila), id=novoId(), data=hoje();
   const pecas=Object.values(r.porTipo).reduce((a,b)=>a+b,0);
-  if(!await salvar("lotes",id,{data,pecas,custo:r2(r.custo),receita:r2(r.receita),lucro:r2(r.lucro),porTipo:r.porTipo,pagoPor:quem,por:USER})){ btn.disabled=false; return; }
+  if(!await salvar("lotes",id,{data,pecas,custo:r2(r.custo),receita:r2(r.receita),lucro:r2(r.lucro),porTipo:r.porTipo,por:USER})){ btn.disabled=false; return; }
   for(const p of fila){
     const itens=itensDe(p).map(it=>({...it,custoUnit:custoUnit(it.tipo,r.porTipo[it.tipo])}));
     await mudarPedido(p,{status:"encomendado",loteId:id,dataEncomenda:data,itens},"Encomendado no lote de "+fmtD(data));
@@ -618,46 +612,11 @@ function rDespesas(){
   const l=S.despesas.filter(d=>(d.data||"").startsWith(mes)).sort((a,b)=>(b.data||"").localeCompare(a.data||""));
   const tot=l.reduce((a,d)=>a+(d.valor||0),0);
   const porCat={}; l.forEach(d=>{ porCat[d.categoria||"outro"]=(porCat[d.categoria||"outro"]||0)+(d.valor||0); });
-  const quem=d=> typeof d.quemIdx==="number" ? nomesSocios()[d.quemIdx] : (d.quem||"");
   $("#v-despesas").innerHTML=`${head}
     <div class="kpis"><div class="kpi"><div class="lab">Despesas do mês</div><div class="val">${brl(tot)}</div><div class="sub">${l.length} lançamento${l.length===1?"":"s"}</div></div></div>
     ${Object.keys(porCat).length?`<div class="box"><h3>Por categoria</h3>${barras(Object.entries(porCat).sort((a,b)=>b[1]-a[1]).map(([c,v])=>[CAT_DESP[c]||c,v,brl(v)]))}</div>`:""}
-    ${l.length?`<div class="list">${l.map(d=>`<div class="row"><div class="main"><div class="t">${esc(d.descricao||CAT_DESP[d.categoria]||"Despesa")}</div><div class="d">${CAT_DESP[d.categoria]||"Outro"} · ${fmtD(d.data)}${quem(d)?" · pago por "+esc(quem(d)):""}</div></div><div class="r num" style="font-weight:600">${brl(d.valor||0)}</div><div class="acts"><button class="btn sm" data-edd="${d.id}">Editar</button></div></div>`).join("")}</div>`
+    ${l.length?`<div class="list">${l.map(d=>`<div class="row"><div class="main"><div class="t">${esc(d.descricao||CAT_DESP[d.categoria]||"Despesa")}</div><div class="d">${CAT_DESP[d.categoria]||"Outro"} · ${fmtD(d.data)}</div></div><div class="r num" style="font-weight:600">${brl(d.valor||0)}</div><div class="acts"><button class="btn sm" data-edd="${d.id}">Editar</button></div></div>`).join("")}</div>`
       :`<div class="empty"><strong>Nenhuma despesa neste mês.</strong>Toque em “+ Despesa” pra lançar embalagem, anúncio, frete ou qualquer gasto da loja. O lucro real desconta tudo daqui.</div>`}`;
-}
-
-/* ----- Acerto entre sócios ----- */
-function calcAcerto(mes){
-  const no = d => !mes || (d||"").startsWith(mes);
-  const nomes=nomesSocios(), ent=[0,0], sai=[0,0]; let entSem=0, saiSem=0;
-  S.pedidos.filter(ativo).forEach(p=>pagamentosDe(p).forEach(x=>{ if(!no(x.data)) return; if(x.quem===0||x.quem===1) ent[x.quem]+=x.valor||0; else entSem+=x.valor||0; }));
-  S.lotes.forEach(l=>{ if(!no(l.data)) return; if(l.pagoPor===0||l.pagoPor===1) sai[l.pagoPor]+=l.custo||0; else saiSem+=l.custo||0; });
-  S.despesas.forEach(d=>{ if(!no(d.data)) return; if(d.quemIdx===0||d.quemIdx===1) sai[d.quemIdx]+=d.valor||0; else saiSem+=d.valor||0; });
-  /* o acerto usa só o dinheiro com dono; valores sem dono aparecem como aviso */
-  const caixa=[ent[0]-sai[0], ent[1]-sai[1]];
-  const lucro=caixa[0]+caixa[1];
-  const pct=CFG.socios.map(s=>(s.pct||0)/100);
-  const parte=[lucro*pct[0], lucro*pct[1]];
-  const dif=[caixa[0]-parte[0], caixa[1]-parte[1]];
-  return {nomes, ent, sai, caixa, lucro, parte, dif, entSem, saiSem};
-}
-function rAcerto(){
-  const head=S.acertoTudo?`<div class="mesnav"><span>Desde o início</span></div>`:navMes();
-  const a=calcAcerto(S.acertoTudo?null:S.mes), n=a.nomes;
-  const deve = a.dif[0]>0.009 ? `<b>${esc(n[0])}</b> repassa <b class="num">${brl(a.dif[0])}</b> pra <b>${esc(n[1])}</b>`
-             : a.dif[1]>0.009 ? `<b>${esc(n[1])}</b> repassa <b class="num">${brl(a.dif[1])}</b> pra <b>${esc(n[0])}</b>` : "Ninguém deve nada a ninguém.";
-  const semNome=!CFG.socios[0].nome||!CFG.socios[1].nome;
-  $("#v-acerto").innerHTML=`${head}
-    <div class="toolbar"><button class="btn sm" id="acerto-modo">${S.acertoTudo?"Ver por mês":"Ver desde o início"}</button></div>
-    ${semNome?`<div class="alert"><div class="grow"><p>Coloque o nome de vocês dois em Ajustes pra o acerto ficar certinho.</p></div><button class="btn sm" data-go="ajustes">Ajustes</button></div>`:""}
-    <div class="box acerto"><h3>Resultado</h3><p class="big-txt">${deve}</p>
-      <p class="tip">Lucro do período (dinheiro que entrou menos o que saiu, só com quem recebeu ou pagou registrado): <b>${brl(a.lucro)}</b>, dividido ${CFG.socios[0].pct}% / ${CFG.socios[1].pct}%.</p></div>
-    <div class="grid2">${[0,1].map(i=>`<div class="box"><h3>${esc(n[i])}</h3>
-      <div class="calc"><div><span>Recebeu de clientes</span><span class="num">${brl(a.ent[i])}</span></div>
-      <div><span>Pagou fornecedor e despesas</span><span class="num">− ${brl(a.sai[i])}</span></div>
-      <div><span>Ficou na mão</span><span class="num">${brl(a.caixa[i])}</span></div>
-      <div><b>Parte dele no lucro</b><b class="num">${brl(a.parte[i])}</b></div></div></div>`).join("")}</div>
-    ${a.entSem||a.saiSem?`<div class="alert"><div class="grow"><p>Tem valores sem dono: ${a.entSem?brl(a.entSem)+" recebidos":""}${a.entSem&&a.saiSem?" e ":""}${a.saiSem?brl(a.saiSem)+" pagos":""} sem dizer quem foi, e por isso ficaram fora do acerto. Pedidos antigos, de antes dos pagamentos, entram aqui. Registre quem recebeu cada pagamento, quem pagou cada lote e cada despesa.</p></div></div>`:""}`;
 }
 
 /* ----- Relatórios ----- */
@@ -674,7 +633,6 @@ function rRelatorios(){
   const prometido=previsao("2026-01-05")?diasEntre("2026-01-05",previsao("2026-01-05")):0;
   const ticket=vend.length?vend.reduce((a,p)=>a+valorPedido(p),0)/vend.length:0;
   const desc=vend.reduce((a,p)=>a+descontoDe(p),0);
-  const porVend={}; vend.forEach(p=>{ const k=typeof p.vendedor==="number"?nomesSocios()[p.vendedor]:"Não informado"; porVend[k]=(porVend[k]||0)+valorPedido(p); });
   const formas={}; S.pedidos.filter(ativo).forEach(p=>(p.pagamentos||[]).forEach(x=>{ const k=FORMAS[x.forma]||"Não informado"; formas[k]=(formas[k]||0)+(x.valor||0); }));
   $("#v-relatorios").innerHTML=`
     <div class="box"><h3>Últimos 6 meses</h3>
@@ -690,7 +648,6 @@ function rRelatorios(){
       <div class="box"><h3>Camisas mais vendidas</h3>${camisas.length?barras(camisas.map(([k,v])=>[k,v])):'<p class="muted small" style="margin:0">Sem vendas ainda.</p>'}</div>
       <div class="box"><h3>Tamanhos</h3>${tamanhos.length?barras(tamanhos.map(([k,v])=>[k,v])):'<p class="muted small" style="margin:0">Sem vendas ainda.</p>'}</div>
       <div class="box"><h3>Versões</h3>${versoes.length?barras(versoes.map(([k,v])=>[k,v])):'<p class="muted small" style="margin:0">Sem vendas ainda.</p>'}</div>
-      <div class="box"><h3>Vendas por sócio</h3>${Object.keys(porVend).length?barras(Object.entries(porVend).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[k,v,brl(v)])):'<p class="muted small" style="margin:0">Sem vendas ainda.</p>'}</div>
       <div class="box"><h3>Formas de pagamento</h3>${Object.keys(formas).length?barras(Object.entries(formas).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[k,v,brl(v)])):'<p class="muted small" style="margin:0">Aparece quando você registrar pagamentos nos pedidos.</p>'}</div>
     </div>`;
 }
@@ -718,9 +675,6 @@ function rAjustes(){
   const linha=t=>{ const T=TIPOS[t]; return T.custos.map((c,i)=>`<tr><td>${i===T.custos.length-1?(i+1)+" ou mais":i+1}</td><td class="n">${brl(c)}</td><td class="n">${brl(T.preco-c)}</td><td class="n">${Math.round(100*(T.preco-c)/T.preco)}%</td></tr>`).join(""); };
   v.innerHTML=`
     <form id="fa" class="ajustes">
-      <div class="box"><h3>Sócios</h3>
-        <div class="grid-socio">${CFG.socios.map((s,i)=>`<div class="fld"><label for="a-s${i}">Sócio ${i+1}</label><input id="a-s${i}" value="${esc(s.nome)}" placeholder="Nome"></div><div class="fld"><label for="a-p${i}">% do lucro</label><input id="a-p${i}" type="number" min="0" max="100" value="${s.pct}"></div>`).join("")}</div>
-        <p class="tip">Usado no Acerto, em quem recebeu cada pagamento e em quem pagou cada despesa.</p></div>
       <div class="box"><h3>Preços e custos do fornecedor</h3>
         <div class="tbl-wrap"><table class="edit"><thead><tr><th>Versão</th><th>Preço de venda</th><th>Custo por quantidade no lote (1, 2, 3…)</th></tr></thead><tbody>
         ${Object.entries(TIPOS).map(([k,T])=>`<tr><td>${T.nome}</td><td><input id="a-tp-${k}" type="number" step="0.01" min="0" value="${T.preco}" aria-label="Preço ${T.nome}"></td><td><input id="a-tc-${k}" value="${T.custos.join(", ")}" aria-label="Custos ${T.nome}"></td></tr>`).join("")}
@@ -757,9 +711,6 @@ async function salvarAjustes(e){
     c.tipos[k]={preco:r2(n("#a-tp-"+k)),custos};
   }
   for(const k of Object.keys(EXTRAS)) c.extras[k]={preco:r2(n("#a-ep-"+k)||0),custo:r2(n("#a-ec-"+k)||0)};
-  const p0=Math.max(0,Math.min(100,n("#a-p0")||0)), p1=Math.max(0,Math.min(100,n("#a-p1")||0));
-  if(Math.round(p0+p1)!==100){ toast("As porcentagens dos sócios precisam somar 100%."); return; }
-  c.socios=[{nome:$("#a-s0").value.trim(),pct:p0},{nome:$("#a-s1").value.trim(),pct:p1}];
   c.prazo={confeccao:Math.max(0,Math.round(n("#a-conf")||0)),uteis:Math.max(0,Math.round(n("#a-uteis")||0))};
   c.diasAviso=Math.max(1,Math.round(n("#a-aviso")||5));
   c.meta=Math.max(0,n("#a-meta")||0);
@@ -804,12 +755,10 @@ document.addEventListener("click", async e=>{
   if(d.virou){ const i=S.interessados.find(x=>x.id===d.virou); formPedido(null,{cliente:i.nome,contato:i.contato||"",camisa:i.camisa||"",deInteressado:i.id}); }
   if(d.desist) formInteressado(S.interessados.find(i=>i.id===d.desist),"desistiu");
   if(d.chegou){ const peds=S.pedidos.filter(p=>p.loteId===d.chegou&&p.status==="encomendado"); for(const p of peds){ await mudarPedido(p,{status:"recebido",dataChegada:hoje()},"Chegou"); } toast(peds.length+" pedido(s) marcados como chegou"); }
-  if(d.lotepago){ if(await atualizar("lotes",d.lotepago,{pagoPor:Number(d.quem)})) toast("Anotado"); }
   if(d.premio){ const k=docCliente(d.premio), reg={...(S.clientes.find(x=>x.id===k)||{})}; delete reg.id; if(await salvar("clientes",k,{...reg,chave:d.premio,premiosUsados:(reg.premiosUsados||0)+1,ultimoPremio:hoje(),por:USER})) toast("Prêmio marcado como entregue"); }
-  if(b.id==="acerto-modo"){ S.acertoTudo=!S.acertoTudo; render(); }
   if(b.id==="backup") baixarBackup(b);
   if(b.id==="numerar") numerarAntigos(b);
-  if(b.id==="fechar"){ $("#fechar-area").innerHTML=`<p class="small" style="margin:0 0 8px">Confirma que você fez a encomenda desses pedidos no fornecedor hoje? Os custos ficam travados com o valor do lote.</p><div class="fld" style="max-width:260px;margin-bottom:10px"><label for="lote-quem">Quem pagou o fornecedor</label><select id="lote-quem">${nomesSocios().map((n,i)=>`<option value="${i}">${esc(n)}</option>`).join("")}</select></div><div class="toolbar"><button class="btn pri" id="fechar-ok">Sim, encomendei</button><button class="btn" id="fechar-no">Cancelar</button></div>`; }
+  if(b.id==="fechar"){ $("#fechar-area").innerHTML=`<p class="small" style="margin:0 0 8px">Confirma que você fez a encomenda desses pedidos no fornecedor hoje? Os custos ficam travados com o valor do lote.</p><div class="toolbar"><button class="btn pri" id="fechar-ok">Sim, encomendei</button><button class="btn" id="fechar-no">Cancelar</button></div>`; }
   if(b.id==="fechar-no") rLotes();
   if(b.id==="fechar-ok") fecharLote(b);
 });
@@ -826,17 +775,15 @@ async function copiarMsg(p){
 function abrirModal(html){ $("#modal").innerHTML=`<div class="ov" id="ov"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`; $("#ov").addEventListener("click",e=>{ if(e.target.id==="ov"||e.target.closest("[data-close]")) fecharModal(); }); }
 function fecharModal(){ $("#modal").innerHTML=""; }
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") fecharModal(); });
-const optSocios = (sel, vazio) => `${vazio?`<option value="">${vazio}</option>`:""}${nomesSocios().map((n,i)=>`<option value="${i}" ${sel===i?"selected":""}>${esc(n)}</option>`).join("")}`;
-const linhaPag = (x,i) => `<div class="pag"><div><b class="num">${brl(x.valor)}</b> <span class="muted small">${dBR(x.data)}${x.forma?" · "+(FORMAS[x.forma]||x.forma):""}${typeof x.quem==="number"?" · "+esc(nomesSocios()[x.quem]):""}${x.antigo?" · registrado antes dos pagamentos":""}</span></div>${x.antigo?"":`<button type="button" class="btn sm danger" data-rmpag="${i}">Remover</button>`}</div>`;
+const linhaPag = (x,i) => `<div class="pag"><div><b class="num">${brl(x.valor)}</b> <span class="muted small">${dBR(x.data)}${x.forma?" · "+(FORMAS[x.forma]||x.forma):""}${x.antigo?" · registrado antes dos pagamentos":""}</span></div>${x.antigo?"":`<button type="button" class="btn sm danger" data-rmpag="${i}">Remover</button>`}</div>`;
 function camposPagamento(pref, falta){
   return `<div class="pag-novo">
     <div class="two"><div class="fld"><label for="${pref}-v">Valor (R$)</label><input id="${pref}-v" type="number" step="0.01" min="0" placeholder="${falta?brl(falta).replace("R$","").trim():""}"></div>
     <div class="fld"><label for="${pref}-d">Data</label><input id="${pref}-d" type="date" value="${hoje()}"></div></div>
-    <div class="two"><div class="fld"><label for="${pref}-f">Forma</label><select id="${pref}-f">${Object.entries(FORMAS).map(([k,n])=>`<option value="${k}">${n}</option>`).join("")}</select></div>
-    <div class="fld"><label for="${pref}-q">Quem recebeu</label><select id="${pref}-q">${optSocios(0)}</select></div></div>
+    <div class="fld"><label for="${pref}-f">Forma</label><select id="${pref}-f">${Object.entries(FORMAS).map(([k,n])=>`<option value="${k}">${n}</option>`).join("")}</select></div>
   </div>`;
 }
-function lerPagamento(pref){ const v=parseFloat($(`#${pref}-v`).value); if(!(v>0)) return null; return {valor:r2(v),data:$(`#${pref}-d`).value||hoje(),forma:$(`#${pref}-f`).value,quem:Number($(`#${pref}-q`).value)}; }
+function lerPagamento(pref){ const v=parseFloat($(`#${pref}-v`).value); if(!(v>0)) return null; return {valor:r2(v),data:$(`#${pref}-d`).value||hoje(),forma:$(`#${pref}-f`).value}; }
 
 /* registrar pagamento rápido, direto da lista */
 function formPagamento(p){
@@ -874,14 +821,13 @@ function formPedido(p, pre){
   abrirModal(`<h2>${ed?`Pedido ${num(p.numero)||""}`:"Novo pedido"}</h2>
     <form id="fp" class="sheet" style="padding:0;max-height:none;background:none">
       <div class="fld"><label for="f-cliente">Cliente</label><input id="f-cliente" required value="${esc(p.cliente)}" placeholder="Nome do cliente"></div>
-      <div class="two"><div class="fld"><label for="f-contato">WhatsApp ou @</label><input id="f-contato" value="${esc(p.contato)}" placeholder="(64) 9…"></div>
-        <div class="fld"><label for="f-vend">Quem vendeu</label><select id="f-vend">${optSocios(typeof p.vendedor==="number"?p.vendedor:null,"—")}</select></div></div>
+      <div class="fld"><label for="f-contato">WhatsApp ou @</label><input id="f-contato" value="${esc(p.contato)}" placeholder="(64) 9…"></div>
       <div class="fld"><label>Camisas do pedido</label><div id="f-itens" class="itens"></div>
         <button type="button" class="btn" id="f-add">+ Adicionar outra camisa</button></div>
       <div id="f-juntar"></div>
       <div class="two">
-        <div class="fld"><label for="f-desc">Desconto (R$)</label><input id="f-desc" type="number" step="0.01" min="0" value="${desc0?r2(desc0):""}" placeholder="0,00"></div>
-        <div class="fld"><label for="f-mdesc">Motivo do desconto</label><input id="f-mdesc" value="${esc(p.motivoDesconto)}" placeholder="Ex.: cliente fiel"></div>
+        <div class="fld"><label for="f-venda">Valor da venda (R$)</label><input id="f-venda" type="number" step="0.01" min="0" value="${desc0?r2(valorPedido(p)):""}" placeholder="igual à tabela"></div>
+        <div class="fld"><label for="f-mdesc">Motivo (se teve desconto)</label><input id="f-mdesc" value="${esc(p.motivoDesconto)}" placeholder="Ex.: cliente fiel"></div>
       </div>
       <div class="calc" id="f-calc"></div>
       <fieldset class="grp"><legend>Pagamentos</legend>
@@ -927,11 +873,11 @@ function formPedido(p, pre){
   const desenharPags=()=>{ $("#f-pags").innerHTML = pags.length ? pags.map(linhaPag).join("") : `<p class="muted small" style="margin:0">Nenhum pagamento registrado.</p>`; };
   const desenharJuntar=()=>{ const outros=mesmoCliente();
     $("#f-juntar").innerHTML = outros.length ? `<div class="alert info"><div class="grow"><p>${esc(outros[0].cliente)} tem ${outros.length===1?"outro pedido":outros.length+" outros pedidos"}: ${outros.map(o=>`${num(o.numero)} ${esc(camisasTxt(o))}`).join("; ")}.</p></div><button type="button" class="btn sm" id="f-juntar-btn">Juntar neste</button></div>` : (juntar.length?`<p class="small muted" style="margin:0">${juntar.length} pedido${juntar.length>1?"s":""} juntado${juntar.length>1?"s":""} aqui. O outro é apagado quando você salvar.</p>`:""); };
-  const totais=()=>{ const tab=itens.reduce((a,it)=>a+precoItem(it),0), ds=Math.max(0,parseFloat($("#f-desc").value)||0); const novo=lerPagamentoSeAberto(); const rec=pags.reduce((a,x)=>a+x.valor,0)+(novo?novo.valor:0); return {tab,ds,val:Math.max(0,tab-ds),rec}; };
+  const totais=()=>{ const tab=itens.reduce((a,it)=>a+precoItem(it),0), vv=$("#f-venda").value, ds=vv===""?0:r2(tab-Math.max(0,parseFloat(vv)||0)); const novo=lerPagamentoSeAberto(); const rec=pags.reduce((a,x)=>a+x.valor,0)+(novo?novo.valor:0); return {tab,ds,val:Math.max(0,r2(tab-ds)),rec}; };
   const lerPagamentoSeAberto=()=>{ const v=parseFloat($("#np-v").value); return v>0?lerPagamento("np"):null; };
   const calc=()=>{ lerItens(); document.querySelectorAll("#f-itens .item-v").forEach((el,i)=>el.textContent=brl(precoItem(itens[i])));
     const t=totais(), c=itens.reduce((a,it)=>a+custoItem(it),0), n=itens.reduce((a,it)=>a+it.qtd,0);
-    $("#f-calc").innerHTML=`<div><span>${n} camisa${n>1?"s":""} pela tabela</span><span class="num">${brl(t.tab)}</span></div>${t.ds?`<div><span>Desconto</span><span class="num">− ${brl(t.ds)}</span></div>`:""}<div><b>Total do pedido</b><b class="num">${brl(t.val)}</b></div><div><span>Custo ${itens.every(it=>typeof it.custoUnit==="number")?"do lote":"se for avulso"}</span><span class="num">${brl(c)}</span></div><div><span>Lucro</span><span class="num">${brl(t.val-c)}</span></div><div><span>Pago</span><span class="num">${brl(t.rec)}</span></div><div><b>Falta receber</b><b class="num">${brl(Math.max(0,t.val-t.rec))}</b></div>`; };
+    $("#f-calc").innerHTML=`<div><span>${n} camisa${n>1?"s":""} pela tabela</span><span class="num">${brl(t.tab)}</span></div>${t.ds>0.004?`<div><span>Desconto (${Math.round(100*t.ds/(t.tab||1))}%)</span><span class="num">− ${brl(t.ds)}</span></div>`:t.ds<-0.004?`<div><span>Acréscimo</span><span class="num">+ ${brl(-t.ds)}</span></div>`:""}<div><b>Total do pedido</b><b class="num">${brl(t.val)}</b></div><div><span>Custo ${itens.every(it=>typeof it.custoUnit==="number")?"do lote":"se for avulso"}</span><span class="num">${brl(c)}</span></div><div><span>Lucro</span><span class="num">${brl(t.val-c)}</span></div><div><span>Pago</span><span class="num">${brl(t.rec)}</span></div><div><b>Falta receber</b><b class="num">${brl(Math.max(0,t.val-t.rec))}</b></div>`; };
   desenharItens(); desenharPags(); desenharJuntar(); calc();
   $("#fp").addEventListener("input",calc);
   $("#fp").addEventListener("change",e=>{ const el=e.target;
@@ -944,7 +890,7 @@ function formPedido(p, pre){
     if(b.id==="f-add"){ lerItens(); const ult=itens[itens.length-1]; itens.push({camisa:"",tipo:ult?ult.tipo:"torcedor",tamanho:ult?ult.tamanho:"G",extras:[],qtd:1}); desenharItens(); calc(); const ins=document.querySelectorAll('#f-itens [data-k="camisa"]'); ins[ins.length-1].focus(); }
     if(b.dataset.rm){ lerItens(); itens.splice(Number(b.dataset.rm),1); desenharItens(); calc(); }
     if(b.dataset.rmpag){ pags.splice(Number(b.dataset.rmpag),1); desenharPags(); calc(); }
-    if(b.id==="f-juntar-btn"){ lerItens(); mesmoCliente().forEach(o=>{ itensDe(o).forEach(it=>itens.push({...it,extras:[...(it.extras||[])]})); pagamentosDe(o).forEach(x=>pags.push({...x})); $("#f-desc").value=r2((parseFloat($("#f-desc").value)||0)+descontoDe(o))||""; juntar.push(o.id); }); desenharItens(); desenharPags(); desenharJuntar(); calc(); toast("Camisas juntadas. Confira e salve."); }
+    if(b.id==="f-juntar-btn"){ lerItens(); mesmoCliente().forEach(o=>{ itensDe(o).forEach(it=>itens.push({...it,extras:[...(it.extras||[])]})); pagamentosDe(o).forEach(x=>pags.push({...x})); if($("#f-venda").value!==""||descontoDe(o)>0){ const atual=$("#f-venda").value===""?itens.slice(0,itens.length-itensDe(o).length).reduce((a,it)=>a+precoItem(it),0):parseFloat($("#f-venda").value)||0; $("#f-venda").value=r2(atual+valorPedido(o)); } juntar.push(o.id); }); desenharItens(); desenharPags(); desenharJuntar(); calc(); toast("Camisas juntadas. Confira e salve."); }
   });
   if(ed) $("#f-del").addEventListener("click",()=>{ $("#del-area").innerHTML=`<button type="button" class="btn danger" id="f-del2">Confirmar exclusão</button>`; $("#f-del2").addEventListener("click",async()=>{ if(await apagar("pedidos",p.id)){ fecharModal(); toast("Pedido excluído"); } }); });
   $("#fp").addEventListener("submit",async e=>{
@@ -957,11 +903,10 @@ function formPedido(p, pre){
     const data={...(ed?p:{}),cliente,contato:$("#f-contato").value.trim(),
       itens:itens.map(it=>{ const o={camisa:it.camisa,tipo:it.tipo,tamanho:it.tamanho,extras:it.extras,qtd:it.qtd}; if(it.foto) o.foto=it.foto; if(typeof it.custoUnit==="number") o.custoUnit=it.custoUnit; return o; }),
       desconto:r2(t.ds), motivoDesconto:$("#f-mdesc").value.trim(),
-      pagamentos:pags.map(x=>{ const z={valor:r2(x.valor),data:x.data||hoje(),forma:x.forma||"",quem:typeof x.quem==="number"?x.quem:null}; return z; }),
+      pagamentos:pags.map(x=>{ return {valor:r2(x.valor),data:x.data||hoje(),forma:x.forma||""}; }),
       entrega:{tipo:$("#f-etipo").value,data:$("#f-edata").value,endereco:$("#f-eend").value.trim(),rastreio:$("#f-erastro").value.trim()},
       dataPedido:$("#f-data").value||hoje(),status:$("#f-status").value,obs:$("#f-obs").value.trim()};
-    const vend=$("#f-vend").value; if(vend!=="") data.vendedor=Number(vend); else delete data.vendedor;
-    ["id","deInteressado","camisa","tipo","tamanho","extras","qtd","custoUnit","valor"].forEach(k=>delete data[k]);
+    ["id","deInteressado","camisa","tipo","tamanho","extras","qtd","custoUnit","valor","vendedor"].forEach(k=>delete data[k]);
     const rec=data.pagamentos.reduce((a,x)=>a+x.valor,0);
     if(data.status==="aguardando"&&rec>0&&rec>=Math.max(0,t.tab-t.ds)-0.009) data.status="pago";
     if(!ed){ data.criado=Date.now(); data.numero=proxNumero(); }
@@ -984,7 +929,7 @@ function formPedido(p, pre){
 }
 
 function formDespesa(d){
-  const ed=!!d; d=d||{data:hoje(),categoria:"embalagem",quemIdx:0};
+  const ed=!!d; d=d||{data:hoje(),categoria:"embalagem"};
   abrirModal(`<h2>${ed?"Editar despesa":"Nova despesa"}</h2>
     <form id="fd" class="sheet" style="padding:0;max-height:none;background:none">
       <div class="fld"><label for="d-desc">O que foi</label><input id="d-desc" value="${esc(d.descricao)}" placeholder="Ex.: 50 sacolas + adesivos"></div>
@@ -992,10 +937,7 @@ function formDespesa(d){
         <div class="fld"><label for="d-valor">Valor (R$)</label><input id="d-valor" type="number" step="0.01" min="0" required value="${d.valor??""}"></div>
         <div class="fld"><label for="d-data">Data</label><input id="d-data" type="date" value="${d.data||hoje()}"></div>
       </div>
-      <div class="two">
-        <div class="fld"><label for="d-cat">Categoria</label><select id="d-cat">${Object.entries(CAT_DESP).map(([k,n])=>`<option value="${k}" ${k===d.categoria?"selected":""}>${n}</option>`).join("")}</select></div>
-        <div class="fld"><label for="d-quem">Quem pagou</label><select id="d-quem">${optSocios(typeof d.quemIdx==="number"?d.quemIdx:null,d.quem?d.quem+" (antigo)":"Não informado")}</select></div>
-      </div>
+      <div class="fld"><label for="d-cat">Categoria</label><select id="d-cat">${Object.entries(CAT_DESP).map(([k,n])=>`<option value="${k}" ${k===d.categoria?"selected":""}>${n}</option>`).join("")}</select></div>
       <div class="sheet-acts">
         ${ed?`<span id="deld-area"><button type="button" class="btn danger" id="d-del">Excluir</button></span>`:"<span></span>"}
         <span class="toolbar"><button type="button" class="btn" data-close>Cancelar</button><button class="btn pri" type="submit">Salvar</button></span>
@@ -1005,8 +947,7 @@ function formDespesa(d){
   $("#fd").addEventListener("submit",async e=>{
     e.preventDefault(); const v=parseFloat($("#d-valor").value);
     if(!(v>0)){ toast("Coloque o valor da despesa."); return; }
-    const q=$("#d-quem").value;
-    const data={descricao:$("#d-desc").value.trim(),valor:r2(v),data:$("#d-data").value||hoje(),categoria:$("#d-cat").value,quemIdx:q===""?null:Number(q),quem:q===""?(d.quem||""):nomesSocios()[Number(q)],por:USER};
+    const data={descricao:$("#d-desc").value.trim(),valor:r2(v),data:$("#d-data").value||hoje(),categoria:$("#d-cat").value,por:USER};
     if(await salvar("despesas",ed?d.id:novoId(),data)){ fecharModal(); toast("Despesa salva"); }
   });
   if(!ed) $("#d-desc").focus();
@@ -1048,7 +989,7 @@ function carregarXLSX(){ if(window.XLSX) return Promise.resolve(window.XLSX); re
 async function baixarBackup(btn){
   btn.disabled=true; const t=btn.textContent; btn.textContent="Gerando planilha…";
   try{
-    const X=await carregarXLSX(), soc=nomesSocios();
+    const X=await carregarXLSX();
     const ord=S.pedidos.slice().sort((a,b)=>(a.numero||0)-(b.numero||0)||(a.dataPedido||"").localeCompare(b.dataPedido||""));
     const ped=[], pag=[];
     ord.forEach(p=>{
@@ -1058,14 +999,13 @@ async function baixarBackup(btn){
           "Camisa":it.camisa||"","Versão":TIPOS[it.tipo]?.nome||"","Tamanho":it.tamanho||"","Qtd":it.qtd||1,
           "Adicionais":(it.extras||[]).map(e=>EXTRAS[e]?.nome).filter(Boolean).join(", "),
           "Valor cobrado (R$)":r2(vit),"Custo (R$)":r2(custoItem(it)),"Lucro bruto (R$)":r2(vit-custoItem(it)),
-          "Custo do lote?":typeof it.custoUnit==="number"?"Sim":"Estimado","Desconto do pedido (R$)":i===0?r2(descontoDe(p)):"","Falta receber (R$)":i===0?faltaDe(p):"",
-          "Vendido por":typeof p.vendedor==="number"?soc[p.vendedor]:"","Entrega":i===0&&p.entrega&&p.entrega.tipo?ENTREGAS[p.entrega.tipo]:"","Endereço":i===0&&p.entrega?p.entrega.endereco||"":"",
+          "Custo do lote?":typeof it.custoUnit==="number"?"Sim":"Estimado","Desconto do pedido (R$)":i===0?r2(descontoDe(p)):"","Falta receber (R$)":i===0?faltaDe(p):"","Entrega":i===0&&p.entrega&&p.entrega.tipo?ENTREGAS[p.entrega.tipo]:"","Endereço":i===0&&p.entrega?p.entrega.endereco||"":"",
           "Encomendado em":dBR(p.dataEncomenda),"Chegou em":dBR(p.dataChegada),"Entregue em":dBR(p.dataEntrega),"Foto":it.foto||"","Observações":i===0?(p.obs||""):"" }); });
-      (p.pagamentos||[]).forEach(x=>pag.push({"Nº":p.numero||"","Cliente":p.cliente||"","Data":dBR(x.data),"Valor (R$)":r2(x.valor),"Forma":FORMAS[x.forma]||"","Quem recebeu":typeof x.quem==="number"?soc[x.quem]:""}));
+      (p.pagamentos||[]).forEach(x=>pag.push({"Nº":p.numero||"","Cliente":p.cliente||"","Data":dBR(x.data),"Valor (R$)":r2(x.valor),"Forma":FORMAS[x.forma]||""}));
     });
     const cli=listaClientes().map(c=>({"Cliente":c.nome,"Contato":c.contato,"Pedidos":c.n,"Camisas pagas":c.camisas,"Total gasto (R$)":r2(c.total),"Última compra":dBR(c.ultima),"Prêmios ganhos":c.premios,"Prêmios entregues":c.usados}));
-    const desp=S.despesas.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||"")).map(d=>({"Data":dBR(d.data),"Descrição":d.descricao||"","Categoria":CAT_DESP[d.categoria]||"Outro","Quem pagou":typeof d.quemIdx==="number"?soc[d.quemIdx]:(d.quem||""),"Valor (R$)":r2(d.valor)}));
-    const lot=S.lotes.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||"")).map(l=>({"Data":dBR(l.data),"Peças":l.pecas,"Custo (R$)":r2(l.custo),"Vendas (R$)":r2(l.receita),"Lucro bruto (R$)":r2(l.lucro),"Pago por":typeof l.pagoPor==="number"?soc[l.pagoPor]:""}));
+    const desp=S.despesas.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||"")).map(d=>({"Data":dBR(d.data),"Descrição":d.descricao||"","Categoria":CAT_DESP[d.categoria]||"Outro","Valor (R$)":r2(d.valor)}));
+    const lot=S.lotes.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||"")).map(l=>({"Data":dBR(l.data),"Peças":l.pecas,"Custo (R$)":r2(l.custo),"Vendas (R$)":r2(l.receita),"Lucro bruto (R$)":r2(l.lucro)}));
     const inte=S.interessados.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||"")).map(i=>({"Data":dBR(i.data),"Nome":i.nome||"","Contato":i.contato||"","Camisa":i.camisa||"","Situação":{aberto:"Em conversa",comprou:"Comprou",desistiu:"Desistiu"}[i.situacao]||"","Motivo":i.situacao==="desistiu"?(MOTIVOS[i.motivo]||""):"","Observações":i.obs||""}));
     const wb=X.utils.book_new();
     const add=(nome,rows,vazio)=>{ const r=rows.length?rows:[{[vazio]:""}]; const ws=X.utils.json_to_sheet(r); const cols=Object.keys(r[0]); ws["!cols"]=cols.map(c=>({wch:Math.min(40,Math.max(c.length+2,...r.map(x=>String(x[c]??"").length+1)))})); X.utils.book_append_sheet(wb,ws,nome); };
