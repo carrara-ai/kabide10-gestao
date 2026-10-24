@@ -152,6 +152,8 @@ img{max-width:100%}
       <button role="tab" data-v="resumo" aria-selected="true">Resumo</button>
       <button role="tab" data-v="pedidos">Pedidos<span class="cnt" id="c-ped"></span></button>
       <button role="tab" data-v="lotes">Lotes<span class="cnt" id="c-lot"></span></button>
+      <button role="tab" data-v="clientes">Clientes</button>
+      <button role="tab" data-v="despesas">Despesas</button>
       <button role="tab" data-v="interessados">Interessados<span class="cnt" id="c-int"></span></button>
       <button role="tab" data-v="tabela">Tabela</button>
     </nav>
@@ -172,6 +174,8 @@ img{max-width:100%}
   <section class="view" id="v-resumo" hidden></section>
   <section class="view" id="v-pedidos" hidden></section>
   <section class="view" id="v-lotes" hidden></section>
+  <section class="view" id="v-clientes" hidden></section>
+  <section class="view" id="v-despesas" hidden></section>
   <section class="view" id="v-interessados" hidden></section>
   <section class="view" id="v-tabela" hidden></section>
 </main>
@@ -233,6 +237,7 @@ function previsao(dataEnc){ if(!dataEnc) return null; const d=parseD(dataEnc); d
 function custoUnit(tipo, qtd){ const c=TIPOS[tipo].custos; return c[Math.min(Math.max(qtd,1),c.length)-1]; }
 function precoPeca(p){ let v=TIPOS[p.tipo]?.preco||0; (p.extras||[]).forEach(e=>{ if(EXTRAS[e]) v+=EXTRAS[e].preco; }); return v; }
 function custoExtras(p){ let v=0; (p.extras||[]).forEach(e=>{ if(EXTRAS[e]) v+=EXTRAS[e].custo; }); return v; }
+const normNome=t=>String(t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim().toLowerCase();
 /* um pedido tem uma lista de camisas (itens); pedidos antigos, de uma camisa só, viram uma lista de 1 */
 function itensDe(p){
   if(Array.isArray(p.itens)&&p.itens.length) return p.itens;
@@ -252,7 +257,7 @@ const ativo = p => p.status!=="cancelado";
 const pagoOuDepois = p => ["pago","encomendado","recebido","entregue"].includes(p.status);
 
 /* ===== estado e banco ===== */
-const S = {pedidos:[], interessados:[], lotes:[], db:null, ready:{pedidos:false,interessados:false,lotes:false}, view:"resumo", filtro:"ativos", busca:"", mes:null};
+const S = {pedidos:[], interessados:[], lotes:[], despesas:[], db:null, ready:{pedidos:false,interessados:false,lotes:false,despesas:false}, buscaCli:"", view:"resumo", filtro:"ativos", busca:"", mes:null};
 
 function toast(msg){ const t=$("#toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true,2600); }
 function erroDb(e){
@@ -275,7 +280,7 @@ async function apagar(col, id){ if(!DB) return false; try{ await deleteDoc(doc(f
 const novoId = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
 function mostrarApp(on){
-  $("#login").hidden=on; $("#tabs").hidden=!on; $("#user").hidden=!on; $("#fab").hidden=!on||S.view==="tabela"||S.view==="posts";
+  $("#login").hidden=on; $("#tabs").hidden=!on; $("#user").hidden=!on; $("#fab").hidden=!on||S.view==="tabela"||S.view==="clientes";
   document.querySelectorAll("section.view").forEach(s=>s.hidden = !on || s.id!=="v-"+S.view);
 }
 function msgLogin(t){ const m=$("#login-msg"); m.textContent=t; m.hidden=!t; }
@@ -297,9 +302,9 @@ if(!CONFIG_OK){
   $("#sair").addEventListener("click", ()=>signOut(auth));
   onAuthStateChanged(auth, user=>{
     unsubs.forEach(u=>u()); unsubs=[];
-    if(!user){ DB=null; S.pedidos=[]; S.interessados=[]; S.lotes=[]; mostrarApp(false); return; }
+    if(!user){ DB=null; S.pedidos=[]; S.interessados=[]; S.lotes=[]; S.despesas=[]; mostrarApp(false); return; }
     $("#user-email").textContent=user.email; DB=fs; mostrarApp(true); render();
-    ["pedidos","interessados","lotes"].forEach(col=>{
+    ["pedidos","interessados","lotes","despesas"].forEach(col=>{
       unsubs.push(onSnapshot(collection(fs,col), snap=>{
         S[col]=snap.docs.map(d=>({id:d.id,...d.data()}));
         S.ready[col]=true; render();
@@ -317,13 +322,13 @@ function irPara(v){
   S.view=v;
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-selected", b.dataset.v===v));
   document.querySelectorAll("section.view").forEach(s=>s.hidden = !DB || s.id!=="v-"+v);
-  $("#fab").textContent = v==="interessados" ? "+ Interessado" : "+ Pedido";
-  $("#fab").hidden = !DB || v==="tabela" || v==="posts";
+  $("#fab").textContent = v==="interessados" ? "+ Interessado" : v==="despesas" ? "+ Despesa" : "+ Pedido";
+  $("#fab").hidden = !DB || v==="tabela" || v==="clientes";
   window.scrollTo(0,0); render();
 }
-const VALID=["resumo","pedidos","lotes","interessados","tabela"];
+const VALID=["resumo","pedidos","lotes","clientes","despesas","interessados","tabela"];
 if(VALID.includes(location.hash.slice(1))) setTimeout(()=>irPara(location.hash.slice(1)),0);
-$("#fab").addEventListener("click", ()=> S.view==="interessados" ? formInteressado() : formPedido());
+$("#fab").addEventListener("click", ()=> S.view==="interessados" ? formInteressado() : S.view==="despesas" ? formDespesa() : formPedido());
 
 /* ===== cálculos ===== */
 function filaLote(){ return S.pedidos.filter(p=>p.status==="pago" && !p.loteId); }
@@ -347,7 +352,7 @@ function render(){
   $("#c-ped").textContent = ped||"";
   $("#c-lot").textContent = filaLote().length||"";
   $("#c-int").textContent = S.interessados.filter(i=>i.situacao==="aberto").length||"";
-  ({resumo:rResumo,pedidos:rPedidos,lotes:rLotes,interessados:rInteressados,tabela:rTabela})[S.view]();
+  ({resumo:rResumo,pedidos:rPedidos,lotes:rLotes,interessados:rInteressados,tabela:rTabela,clientes:rClientes,despesas:rDespesas})[S.view]();
 }
 
 function rResumo(){
@@ -358,6 +363,9 @@ function rResumo(){
   const fatTot=todos.reduce((a,p)=>a+valorPedido(p),0), lucTot=todos.reduce((a,p)=>a+valorPedido(p)-custoPedido(p),0);
   const fat=doMes.reduce((a,p)=>a+valorPedido(p),0);
   const luc=doMes.reduce((a,p)=>a+valorPedido(p)-custoPedido(p),0);
+  const despMes=S.despesas.filter(d=>(d.data||"").startsWith(mes)).reduce((a,d)=>a+(d.valor||0),0);
+  const despTot=S.despesas.reduce((a,d)=>a+(d.valor||0),0);
+  const real=luc-despMes;
   const pend=S.pedidos.filter(p=>p.status==="aguardando");
   const and=S.pedidos.filter(p=>["pago","encomendado","recebido"].includes(p.status));
   const ints=S.interessados.filter(i=>i.situacao!=="aberto");
@@ -378,14 +386,15 @@ function rResumo(){
     <div class="mesnav"><button class="btn sm" data-mes="-1" aria-label="Mês anterior">‹</button><span>${nomeMes[0].toUpperCase()+nomeMes.slice(1)}</span><button class="btn sm" data-mes="1" aria-label="Próximo mês" ${ehAtual?"disabled":""}>›</button></div>
     <div class="kpis">
       <div class="kpi hi"><div class="lab">Faturamento em ${nomeMes}</div><div class="val">${brl(fat)}</div><div class="sub">${doMes.length} pedido${doMes.length===1?"":"s"} pagos</div></div>
-      <div class="kpi"><div class="lab">Lucro estimado no mês</div><div class="val">${brl(luc)}</div><div class="sub">${fat?Math.round(100*luc/fat)+"% de margem":"sem vendas ainda"}</div></div>
-      <div class="kpi"><div class="lab">Desde o início</div><div class="val">${brl(fatTot)}</div><div class="sub">lucro estimado ${brl(lucTot)} · ${todos.length} pedido${todos.length===1?"":"s"}</div></div>
+      <div class="kpi"><div class="lab">Lucro real no mês</div><div class="val" style="color:${real<0?"var(--bad)":"inherit"}">${brl(real)}</div><div class="sub">bruto ${brl(luc)} − despesas ${brl(despMes)}</div></div>
+      <div class="kpi"><div class="lab">Desde o início</div><div class="val">${brl(fatTot)}</div><div class="sub">lucro real ${brl(lucTot-despTot)} · ${todos.length} pedido${todos.length===1?"":"s"}</div></div>
       <div class="kpi"><div class="lab">Em andamento</div><div class="val">${and.length}</div><div class="sub">pagos, encomendados ou já chegaram</div></div>
       <div class="kpi"><div class="lab">A receber</div><div class="val">${brl(pend.reduce((a,p)=>a+valorPedido(p),0))}</div><div class="sub">${pend.length} aguardando Pix</div></div>
     </div>
     <div class="box"><h3>O que fazer agora</h3>
       ${carregando?`<p class="muted">Carregando dados da loja…</p>`: al.length?`<div class="alerts">${al.join("")}</div>`:`<div class="empty"><strong>Nada pendente.</strong>Quando um cliente precisar de notícia, um lote estiver pronto ou uma camisa chegar, aparece aqui.</div>`}
     </div>
+    <div class="box"><h3>Backup</h3><p class="muted small" style="margin:0 0 10px">Baixa tudo numa planilha do Excel: pedidos (uma linha por camisa), clientes, despesas, lotes e interessados.</p><button class="btn" id="backup">Baixar backup em Excel</button></div>
     <div class="box"><h3>Por que as pessoas desistem?</h3>
       ${ints.length<5?`<p class="muted small">Registre cada pessoa que pergunta de camisa na aba Interessados. Com pelo menos 5 respostas fechadas, aqui aparece se o problema é mesmo o prazo. Hoje: ${ints.length} de 5.</p>`:`<p><span class="num" style="font-size:20px;font-weight:600">${conv}%</span> <span class="muted">dos interessados compraram.</span></p>${blocoMotivos()}`}
     </div>`;
@@ -509,11 +518,13 @@ document.addEventListener("change", async e=>{
     if(t.value==="entregue") ch.dataEntrega=hoje();
     if(await atualizar("pedidos",p.id,ch)) toast("Status: "+STATUS_NOME[t.value]); }
 });
-document.addEventListener("input", e=>{ if(e.target.id==="busca"){ S.busca=e.target.value; clearTimeout(rPedidos._t); rPedidos._t=setTimeout(rPedidos,150); } });
+document.addEventListener("input", e=>{ if(e.target.id==="busca-cli"){ S.buscaCli=e.target.value; clearTimeout(rClientes._t); rClientes._t=setTimeout(rClientes,150); } if(e.target.id==="busca"){ S.busca=e.target.value; clearTimeout(rPedidos._t); rPedidos._t=setTimeout(rPedidos,150); } });
 document.addEventListener("click", async e=>{
   const b=e.target.closest("button"); if(!b) return;
   const d=b.dataset;
   if(d.go) irPara(d.go);
+  if(d.edd) formDespesa(S.despesas.find(x=>x.id===d.edd));
+  if(b.id==="backup") baixarBackup(b);
   if(d.mes){ const [y,m]=(S.mes||hoje().slice(0,7)).split("-").map(Number); const dt=new Date(y,m-1+Number(d.mes),1); S.mes=dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0"); render(); }
   if(d.ed) formPedido(S.pedidos.find(p=>p.id===d.ed));
   if(d.edi) formInteressado(S.interessados.find(i=>i.id===d.edi));
@@ -548,6 +559,120 @@ async function copiarMsg(p){
 }
 
 
+
+/* ===== Clientes ===== */
+function listaClientes(){
+  const m=new Map();
+  S.pedidos.filter(ativo).forEach(p=>{
+    const k=normNome(p.cliente); if(!k) return;
+    if(!m.has(k)) m.set(k,{nome:p.cliente,contato:"",peds:[]});
+    m.get(k).peds.push(p);
+  });
+  return [...m.values()].map(c=>{
+    c.peds.sort((a,b)=>(b.dataPedido||"").localeCompare(a.dataPedido||""));
+    const pagos=c.peds.filter(pagoOuDepois);
+    c.nome=c.peds.map(p=>String(p.cliente).replace(/\s+/g," ").trim()).sort((x,y)=>(y.match(/[A-ZÀ-Ý]/g)||[]).length-(x.match(/[A-ZÀ-Ý]/g)||[]).length)[0];
+    c.contato=(c.peds.find(p=>p.contato)||{}).contato||"";
+    c.total=pagos.reduce((a,p)=>a+valorPedido(p),0);
+    c.camisas=c.peds.reduce((a,p)=>a+pecasDe(p),0);
+    c.ultima=c.peds[0].dataPedido;
+    c.n=c.peds.length;
+    return c;
+  }).sort((a,b)=>b.total-a.total||b.n-a.n);
+}
+function rClientes(){
+  const busca=document.activeElement&&document.activeElement.id==="busca-cli";
+  const q=normNome(S.buscaCli);
+  const todos=listaClientes(), l=q?todos.filter(c=>normNome(c.nome+" "+c.contato).includes(q)):todos;
+  const voltaram=todos.filter(c=>c.n>=2).length;
+  $("#v-clientes").innerHTML=`
+    <div class="kpis">
+      <div class="kpi"><div class="lab">Clientes</div><div class="val">${todos.length}</div><div class="sub">já fizeram pelo menos um pedido</div></div>
+      <div class="kpi hi"><div class="lab">Voltaram a comprar</div><div class="val">${voltaram}</div><div class="sub">${todos.length?Math.round(100*voltaram/todos.length)+"% dos clientes":"—"}</div></div>
+    </div>
+    <div class="toolbar"><input id="busca-cli" type="search" placeholder="Buscar cliente" value="${esc(S.buscaCli)}" aria-label="Buscar cliente"></div>
+    ${!todos.length?`<div class="empty"><strong>Nenhum cliente ainda.</strong>A lista monta sozinha a partir dos pedidos registrados.</div>`:
+      l.length?`<div class="list">${l.map(c=>`<div class="row">
+        <div class="main"><div class="t">${esc(c.nome)} ${c.n>=3?'<span class="pill s-recebido">Fiel</span>':c.n===2?'<span class="pill s-pago">Voltou</span>':""}</div>
+          <div class="d">${c.n} pedido${c.n>1?"s":""} · ${c.camisas} camisa${c.camisas>1?"s":""} · última em ${fmtD(c.ultima)}${c.contato?" · "+esc(c.contato):""}</div>
+          <div class="d">${esc([...new Set(c.peds.flatMap(p=>itensDe(p).map(it=>it.camisa)))].filter(Boolean).join(", "))}</div></div>
+        <div class="r"><div class="num" style="font-weight:600">${brl(c.total)}</div><div class="d">gasto</div></div>
+      </div>`).join("")}</div>`:`<div class="empty">Nenhum cliente com esse nome.</div>`}`;
+  if(busca){ const i=$("#busca-cli"); i.focus(); i.setSelectionRange(i.value.length,i.value.length); }
+}
+
+/* ===== Despesas ===== */
+const CAT_DESP={embalagem:"Embalagem e adesivos",anuncio:"Impulsionamento / anúncio",frete:"Frete pro cliente",material:"Material e brindes",outro:"Outro"};
+function rDespesas(){
+  if(!S.mes) S.mes=hoje().slice(0,7);
+  const mes=S.mes, [my,mm]=mes.split("-").map(Number);
+  const nomeMes=new Date(my,mm-1,1).toLocaleDateString("pt-BR",{month:"long",year:my!==new Date().getFullYear()?"numeric":undefined});
+  const l=S.despesas.filter(d=>(d.data||"").startsWith(mes)).sort((a,b)=>(b.data||"").localeCompare(a.data||""));
+  const tot=l.reduce((a,d)=>a+(d.valor||0),0);
+  const porCat={}; l.forEach(d=>{ porCat[d.categoria||"outro"]=(porCat[d.categoria||"outro"]||0)+(d.valor||0); });
+  $("#v-despesas").innerHTML=`
+    <div class="mesnav"><button class="btn sm" data-mes="-1" aria-label="Mês anterior">‹</button><span>${nomeMes[0].toUpperCase()+nomeMes.slice(1)}</span><button class="btn sm" data-mes="1" aria-label="Próximo mês" ${mes===hoje().slice(0,7)?"disabled":""}>›</button></div>
+    <div class="kpis"><div class="kpi"><div class="lab">Despesas do mês</div><div class="val">${brl(tot)}</div><div class="sub">${l.length} lançamento${l.length===1?"":"s"}</div></div></div>
+    ${Object.keys(porCat).length?`<div class="box"><h3>Por categoria</h3><div class="motivo">${Object.entries(porCat).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div><div style="display:flex;justify-content:space-between;gap:8px"><span>${CAT_DESP[c]||c}</span><span class="num">${brl(v)}</span></div><div class="bar"><i style="width:${tot?100*v/tot:0}%"></i></div></div>`).join("")}</div></div>`:""}
+    ${l.length?`<div class="list">${l.map(d=>`<div class="row"><div class="main"><div class="t">${esc(d.descricao||CAT_DESP[d.categoria]||"Despesa")}</div><div class="d">${CAT_DESP[d.categoria]||"Outro"} · ${fmtD(d.data)}${d.quem?" · pago por "+esc(d.quem):""}</div></div><div class="r num" style="font-weight:600">${brl(d.valor||0)}</div><div class="acts"><button class="btn sm" data-edd="${d.id}">Editar</button></div></div>`).join("")}</div>`
+      :`<div class="empty"><strong>Nenhuma despesa neste mês.</strong>Toque em “+ Despesa” pra lançar embalagem, anúncio, frete ou qualquer gasto da loja. O lucro real do Resumo desconta tudo daqui.</div>`}`;
+}
+function formDespesa(d){
+  const ed=!!d; d=d||{data:hoje(),categoria:"embalagem"};
+  abrirModal(`<h2>${ed?"Editar despesa":"Nova despesa"}</h2>
+    <form id="fd" class="sheet" style="padding:0;max-height:none;background:none">
+      <div class="fld"><label for="d-desc">O que foi</label><input id="d-desc" value="${esc(d.descricao)}" placeholder="Ex.: 50 sacolas + adesivos"></div>
+      <div class="two">
+        <div class="fld"><label for="d-valor">Valor (R$)</label><input id="d-valor" type="number" step="0.01" min="0" required value="${d.valor??""}"></div>
+        <div class="fld"><label for="d-data">Data</label><input id="d-data" type="date" value="${d.data||hoje()}"></div>
+      </div>
+      <div class="fld"><label for="d-cat">Categoria</label><select id="d-cat">${Object.entries(CAT_DESP).map(([k,n])=>`<option value="${k}" ${k===d.categoria?"selected":""}>${n}</option>`).join("")}</select></div>
+      <div class="fld"><label for="d-quem">Quem pagou</label><input id="d-quem" value="${esc(d.quem)}" placeholder="Você ou seu sócio"></div>
+      <div class="sheet-acts">
+        ${ed?`<span id="deld-area"><button type="button" class="btn danger" id="d-del">Excluir</button></span>`:"<span></span>"}
+        <span class="toolbar"><button type="button" class="btn" data-close>Cancelar</button><button class="btn pri" type="submit">Salvar</button></span>
+      </div>
+    </form>`);
+  if(ed) $("#d-del").addEventListener("click",()=>{ $("#deld-area").innerHTML=`<button type="button" class="btn danger" id="d-del2">Confirmar exclusão</button>`; $("#d-del2").addEventListener("click",async()=>{ if(await apagar("despesas",d.id)){ fecharModal(); toast("Despesa excluída"); } }); });
+  $("#fd").addEventListener("submit",async e=>{
+    e.preventDefault(); const v=parseFloat($("#d-valor").value);
+    if(!(v>0)){ toast("Coloque o valor da despesa."); return; }
+    const data={descricao:$("#d-desc").value.trim(),valor:Math.round(v*100)/100,data:$("#d-data").value||hoje(),categoria:$("#d-cat").value,quem:$("#d-quem").value.trim()};
+    if(await salvar("despesas",ed?d.id:novoId(),data)){ fecharModal(); toast("Despesa salva"); }
+  });
+  if(!ed) $("#d-desc").focus();
+}
+
+/* ===== Backup em Excel ===== */
+function carregarXLSX(){ if(window.XLSX) return Promise.resolve(window.XLSX); return new Promise((ok,err)=>{ const sc=document.createElement("script"); sc.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"; sc.onload=()=>ok(window.XLSX); sc.onerror=()=>err(new Error("xlsx")); document.head.appendChild(sc); }); }
+const dBR = iso => iso ? parseD(iso).toLocaleDateString("pt-BR") : "";
+async function baixarBackup(btn){
+  btn.disabled=true; const t=btn.textContent; btn.textContent="Gerando planilha…";
+  try{
+    const X=await carregarXLSX();
+    const r2=v=>Math.round((v||0)*100)/100;
+    const ped=[]; S.pedidos.slice().sort((a,b)=>(a.dataPedido||"").localeCompare(b.dataPedido||"")).forEach(p=>{
+      const its=itensDe(p), tab=tabelaPedido(p)||1, val=valorPedido(p);
+      its.forEach((it,i)=>{ const pr=precoItem(it), vit=val*pr/tab;
+        ped.push({"Data do pedido":dBR(p.dataPedido),"Cliente":p.cliente||"","Contato":p.contato||"","Status":STATUS_NOME[p.status]||p.status,
+          "Camisa":it.camisa||"","Versão":TIPOS[it.tipo]?.nome||"","Tamanho":it.tamanho||"","Qtd":it.qtd||1,
+          "Adicionais":(it.extras||[]).map(e=>EXTRAS[e]?.nome).filter(Boolean).join(", "),
+          "Valor cobrado (R$)":r2(vit),"Custo (R$)":r2(custoItem(it)),"Lucro bruto (R$)":r2(vit-custoItem(it)),
+          "Custo do lote?":typeof it.custoUnit==="number"?"Sim":"Estimado","Encomendado em":dBR(p.dataEncomenda),"Chegou em":dBR(p.dataChegada),"Entregue em":dBR(p.dataEntrega),
+          "Observações":i===0?(p.obs||""):"" }); }); });
+    const cli=listaClientes().map(c=>({"Cliente":c.nome,"Contato":c.contato,"Pedidos":c.n,"Camisas":c.camisas,"Total gasto (R$)":r2(c.total),"Última compra":dBR(c.ultima)}));
+    const desp=S.despesas.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||"")).map(d=>({"Data":dBR(d.data),"Descrição":d.descricao||"","Categoria":CAT_DESP[d.categoria]||"Outro","Quem pagou":d.quem||"","Valor (R$)":r2(d.valor)}));
+    const lot=S.lotes.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||"")).map(l=>({"Data":dBR(l.data),"Peças":l.pecas,"Custo (R$)":r2(l.custo),"Recebido (R$)":r2(l.receita),"Lucro bruto (R$)":r2(l.lucro)}));
+    const inte=S.interessados.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||"")).map(i=>({"Data":dBR(i.data),"Nome":i.nome||"","Contato":i.contato||"","Camisa":i.camisa||"","Situação":{aberto:"Em conversa",comprou:"Comprou",desistiu:"Desistiu"}[i.situacao]||"","Motivo":i.situacao==="desistiu"?(MOTIVOS[i.motivo]||""):"","Observações":i.obs||""}));
+    const wb=X.utils.book_new();
+    const add=(nome,rows,vazio)=>{ const ws=X.utils.json_to_sheet(rows.length?rows:[{[vazio]:""}]); const cols=Object.keys(rows[0]||{[vazio]:""}); ws["!cols"]=cols.map(c=>({wch:Math.min(40,Math.max(c.length+2,...rows.map(r=>String(r[c]??"").length+1)))})); X.utils.book_append_sheet(wb,ws,nome); };
+    add("Pedidos",ped,"Sem pedidos"); add("Clientes",cli,"Sem clientes"); add("Despesas",desp,"Sem despesas"); add("Lotes",lot,"Sem lotes"); add("Interessados",inte,"Sem interessados");
+    X.writeFile(wb,`kabide10-backup-${hoje()}.xlsx`);
+    toast("Backup baixado");
+  }catch(e){ toast("Não deu pra gerar a planilha. Confira a internet e tente de novo."); }
+  btn.disabled=false; btn.textContent=t;
+}
+
 /* ===== modal ===== */
 function abrirModal(html){ $("#modal").innerHTML=`<div class="ov" id="ov"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`; $("#ov").addEventListener("click",e=>{ if(e.target.id==="ov"||e.target.closest("[data-close]")) fecharModal(); }); }
 function fecharModal(){ $("#modal").innerHTML=""; }
@@ -557,8 +682,9 @@ function formPedido(p, pre){
   const ed=!!p; p=p||{status:"aguardando",dataPedido:hoje(),...(pre||{})};
   let itens=(ed?itensDe(p):[{camisa:(pre&&pre.camisa)||"",tipo:"torcedor",tamanho:"G",extras:[],qtd:1}]).map(it=>({...it,extras:[...(it.extras||[])]}));
   const juntar=[]; // pedidos do mesmo cliente que serão juntados neste
-  const mesmoCliente=()=>{ const n=($("#f-cliente")?.value||p.cliente||"").trim().toLowerCase(); if(!n) return [];
-    return S.pedidos.filter(o=>o.id!==p.id&&!juntar.includes(o.id)&&(o.cliente||"").trim().toLowerCase()===n&&!o.loteId&&!["entregue","cancelado"].includes(o.status)); };
+  const norm=normNome;
+  const mesmoCliente=()=>{ const n=norm($("#f-cliente")?.value||p.cliente); if(!n) return [];
+    return S.pedidos.filter(o=>o.id!==p.id&&!juntar.includes(o.id)&&norm(o.cliente)===n&&o.status!=="cancelado"&&(o.loteId||"")===(p.loteId||"")); };
   abrirModal(`<h2>${ed?"Editar pedido":"Novo pedido"}</h2>
     <form id="fp" class="sheet" style="padding:0;max-height:none;background:none">
       <div class="fld"><label for="f-cliente">Cliente</label><input id="f-cliente" required value="${esc(p.cliente)}" placeholder="Nome do cliente"></div>
