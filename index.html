@@ -56,6 +56,8 @@ h3{font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted
 .muted{color:var(--muted)}
 .small{font-size:13px}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.mesnav{display:flex;align-items:center;gap:12px;font-family:var(--display);font-weight:700;font-size:22px}
+.mesnav span{min-width:0}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
 .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
 .kpi .lab{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
@@ -109,12 +111,20 @@ tr.cur td{color:var(--accent);font-weight:600}
 .sheet{background:var(--panel);width:100%;max-width:560px;max-height:92%;overflow:auto;border-radius:14px 14px 0 0;padding:18px max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 18px) max(16px,env(safe-area-inset-left,0px));display:grid;gap:12px}
 @media (min-width:640px){.ov{align-items:center}.sheet{border-radius:14px}}
 .fld{display:grid;gap:4px}
-.fld label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.fld > label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
 .fld input,.fld select,.fld textarea{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;width:100%;min-width:0}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{display:flex;gap:6px;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:99px;padding:6px 10px;font-size:13px;cursor:pointer}
 .chip input{accent-color:var(--accent);margin:0}
+.itens{display:grid;gap:10px;margin-bottom:8px}
+.item{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;display:grid;gap:8px}
+.item input,.item select{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px;width:100%;min-width:0}
+.item .chip{background:var(--panel);font-size:13px;padding:5px 9px;gap:5px}
+.item .chips{gap:5px}
+.item-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.three{display:grid;grid-template-columns:1.3fr 1fr 70px;gap:8px}
+.item-v{text-align:right;font-weight:600;font-size:14px;color:var(--muted)}
 .calc{background:var(--panel-2);border-radius:8px;padding:10px 12px;display:grid;gap:2px;font-size:14px}
 .calc div{display:flex;justify-content:space-between;gap:10px}
 .sheet-acts{display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap}
@@ -128,7 +138,9 @@ img{max-width:100%}
 .login .box{max-width:400px;width:100%;display:grid;gap:14px;padding:24px}
 .capa{background:#0c0d0b;border-radius:12px;padding:22px 18px;display:grid;place-items:center}
 .capa img{width:100%;max-width:320px;height:auto;display:block}
-.user{margin-left:auto;display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+.user{margin-left:auto;display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted);text-transform:none;letter-spacing:0;min-width:0}
+.user span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:none;letter-spacing:0;font-size:12px}
+
 </style>
 </head>
 <body>
@@ -221,18 +233,26 @@ function previsao(dataEnc){ if(!dataEnc) return null; const d=parseD(dataEnc); d
 function custoUnit(tipo, qtd){ const c=TIPOS[tipo].custos; return c[Math.min(Math.max(qtd,1),c.length)-1]; }
 function precoPeca(p){ let v=TIPOS[p.tipo]?.preco||0; (p.extras||[]).forEach(e=>{ if(EXTRAS[e]) v+=EXTRAS[e].preco; }); return v; }
 function custoExtras(p){ let v=0; (p.extras||[]).forEach(e=>{ if(EXTRAS[e]) v+=EXTRAS[e].custo; }); return v; }
-function valorPedido(p){ return (typeof p.valor==="number") ? p.valor : precoPeca(p)*(p.qtd||1); }
-/* custo: fixado quando o lote fecha; antes disso, estimado como peça avulsa (pior caso) */
-function custoPedido(p){
-  const q=p.qtd||1;
-  if(typeof p.custoUnit==="number") return (p.custoUnit+custoExtras(p))*q;
-  return (custoUnit(p.tipo,1)+custoExtras(p))*q;
+/* um pedido tem uma lista de camisas (itens); pedidos antigos, de uma camisa só, viram uma lista de 1 */
+function itensDe(p){
+  if(Array.isArray(p.itens)&&p.itens.length) return p.itens;
+  return [{camisa:p.camisa||"",tipo:p.tipo||"torcedor",tamanho:p.tamanho||"",extras:p.extras||[],qtd:p.qtd||1,...(typeof p.custoUnit==="number"?{custoUnit:p.custoUnit}:{})}];
 }
+const pecasDe = p => itensDe(p).reduce((a,it)=>a+(it.qtd||1),0);
+function precoItem(it){ return precoPeca(it)*(it.qtd||1); }
+function tabelaPedido(p){ return itensDe(p).reduce((a,it)=>a+precoItem(it),0); }
+function valorPedido(p){ return (typeof p.valor==="number") ? p.valor : tabelaPedido(p); }
+/* custo: fixado quando o lote fecha; antes disso, estimado como peça avulsa (pior caso) */
+function custoItem(it){ const u=typeof it.custoUnit==="number"?it.custoUnit:custoUnit(it.tipo,1); return (u+custoExtras(it))*(it.qtd||1); }
+function custoPedido(p){ return itensDe(p).reduce((a,it)=>a+custoItem(it),0); }
+const custoFixo = p => itensDe(p).every(it=>typeof it.custoUnit==="number");
+function nomeItem(it){ const ex=(it.extras||[]).filter(e=>e!=="xg").map(e=>EXTRAS[e]?.nome).filter(Boolean).join(", "); return `${(it.qtd||1)>1?it.qtd+"× ":""}${it.camisa} · ${TIPOS[it.tipo]?.nome||""} ${it.tamanho||""}${ex?" · "+ex:""}`; }
+const camisasTxt = p => itensDe(p).map(it=>it.camisa).filter(Boolean).join(", ");
 const ativo = p => p.status!=="cancelado";
 const pagoOuDepois = p => ["pago","encomendado","recebido","entregue"].includes(p.status);
 
 /* ===== estado e banco ===== */
-const S = {pedidos:[], interessados:[], lotes:[], db:null, ready:{pedidos:false,interessados:false,lotes:false}, view:"resumo", filtro:"ativos", busca:""};
+const S = {pedidos:[], interessados:[], lotes:[], db:null, ready:{pedidos:false,interessados:false,lotes:false}, view:"resumo", filtro:"ativos", busca:"", mes:null};
 
 function toast(msg){ const t=$("#toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true,2600); }
 function erroDb(e){
@@ -255,7 +275,7 @@ async function apagar(col, id){ if(!DB) return false; try{ await deleteDoc(doc(f
 const novoId = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
 function mostrarApp(on){
-  $("#login").hidden=on; $("#tabs").hidden=!on; $("#user").hidden=!on; $("#fab").hidden=!on||S.view==="tabela";
+  $("#login").hidden=on; $("#tabs").hidden=!on; $("#user").hidden=!on; $("#fab").hidden=!on||S.view==="tabela"||S.view==="posts";
   document.querySelectorAll("section.view").forEach(s=>s.hidden = !on || s.id!=="v-"+S.view);
 }
 function msgLogin(t){ const m=$("#login-msg"); m.textContent=t; m.hidden=!t; }
@@ -298,7 +318,7 @@ function irPara(v){
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-selected", b.dataset.v===v));
   document.querySelectorAll("section.view").forEach(s=>s.hidden = !DB || s.id!=="v-"+v);
   $("#fab").textContent = v==="interessados" ? "+ Interessado" : "+ Pedido";
-  $("#fab").hidden = !DB || v==="tabela";
+  $("#fab").hidden = !DB || v==="tabela" || v==="posts";
   window.scrollTo(0,0); render();
 }
 const VALID=["resumo","pedidos","lotes","interessados","tabela"];
@@ -309,9 +329,9 @@ $("#fab").addEventListener("click", ()=> S.view==="interessados" ? formInteressa
 function filaLote(){ return S.pedidos.filter(p=>p.status==="pago" && !p.loteId); }
 function resumoLote(peds){
   const porTipo={};
-  peds.forEach(p=>{ porTipo[p.tipo]=(porTipo[p.tipo]||0)+(p.qtd||1); });
+  peds.forEach(p=>itensDe(p).forEach(it=>{ porTipo[it.tipo]=(porTipo[it.tipo]||0)+(it.qtd||1); }));
   let custo=0, receita=0;
-  peds.forEach(p=>{ const q=p.qtd||1; custo+=(custoUnit(p.tipo,porTipo[p.tipo])+custoExtras(p))*q; receita+=valorPedido(p); });
+  peds.forEach(p=>{ itensDe(p).forEach(it=>{ custo+=(custoUnit(it.tipo,porTipo[it.tipo])+custoExtras(it))*(it.qtd||1); }); receita+=valorPedido(p); });
   return {porTipo, custo, receita, lucro:receita-custo};
 }
 function precisaAviso(p){
@@ -331,15 +351,20 @@ function render(){
 }
 
 function rResumo(){
-  const mes=hoje().slice(0,7);
+  if(!S.mes) S.mes=hoje().slice(0,7);
+  const mes=S.mes;
   const doMes=S.pedidos.filter(p=>ativo(p)&&pagoOuDepois(p)&&(p.dataPedido||"").startsWith(mes));
+  const todos=S.pedidos.filter(p=>ativo(p)&&pagoOuDepois(p));
+  const fatTot=todos.reduce((a,p)=>a+valorPedido(p),0), lucTot=todos.reduce((a,p)=>a+valorPedido(p)-custoPedido(p),0);
   const fat=doMes.reduce((a,p)=>a+valorPedido(p),0);
   const luc=doMes.reduce((a,p)=>a+valorPedido(p)-custoPedido(p),0);
   const pend=S.pedidos.filter(p=>p.status==="aguardando");
   const and=S.pedidos.filter(p=>["pago","encomendado","recebido"].includes(p.status));
   const ints=S.interessados.filter(i=>i.situacao!=="aberto");
   const conv=ints.length? Math.round(100*ints.filter(i=>i.situacao==="comprou").length/ints.length):null;
-  const nomeMes=new Date().toLocaleDateString("pt-BR",{month:"long"});
+  const [my,mm]=mes.split("-").map(Number);
+  const nomeMes=new Date(my,mm-1,1).toLocaleDateString("pt-BR",{month:"long",year:my!==new Date().getFullYear()?"numeric":undefined});
+  const ehAtual = mes===hoje().slice(0,7);
 
   const al=[];
   S.pedidos.filter(atrasado).forEach(p=>al.push(`<div class="alert bad"><div class="grow"><p><b>${esc(p.cliente)}</b> passou da previsão (${fmtD(previsao(p.dataEncomenda))}). Cobre o fornecedor e avise o cliente.</p></div><button class="btn sm" data-ed="${p.id}">Abrir</button></div>`));
@@ -350,9 +375,11 @@ function rResumo(){
 
   const carregando = DB && !S.ready.pedidos;
   $("#v-resumo").innerHTML = `
+    <div class="mesnav"><button class="btn sm" data-mes="-1" aria-label="Mês anterior">‹</button><span>${nomeMes[0].toUpperCase()+nomeMes.slice(1)}</span><button class="btn sm" data-mes="1" aria-label="Próximo mês" ${ehAtual?"disabled":""}>›</button></div>
     <div class="kpis">
       <div class="kpi hi"><div class="lab">Faturamento em ${nomeMes}</div><div class="val">${brl(fat)}</div><div class="sub">${doMes.length} pedido${doMes.length===1?"":"s"} pagos</div></div>
       <div class="kpi"><div class="lab">Lucro estimado no mês</div><div class="val">${brl(luc)}</div><div class="sub">${fat?Math.round(100*luc/fat)+"% de margem":"sem vendas ainda"}</div></div>
+      <div class="kpi"><div class="lab">Desde o início</div><div class="val">${brl(fatTot)}</div><div class="sub">lucro estimado ${brl(lucTot)} · ${todos.length} pedido${todos.length===1?"":"s"}</div></div>
       <div class="kpi"><div class="lab">Em andamento</div><div class="val">${and.length}</div><div class="sub">pagos, encomendados ou já chegaram</div></div>
       <div class="kpi"><div class="lab">A receber</div><div class="val">${brl(pend.reduce((a,p)=>a+valorPedido(p),0))}</div><div class="sub">${pend.length} aguardando Pix</div></div>
     </div>
@@ -373,14 +400,13 @@ function blocoMotivos(){
 }
 
 function linhaPedido(p){
-  const q=p.qtd||1, v=valorPedido(p), c=custoPedido(p);
-  const ex=(p.extras||[]).map(e=>EXTRAS[e]?.nome).filter(Boolean).join(", ");
+  const v=valorPedido(p), c=custoPedido(p), n=pecasDe(p);
   const pv = p.status==="encomendado" ? ` · chega até ${fmtD(previsao(p.dataEncomenda))}` : "";
-  const est = typeof p.custoUnit==="number" ? "" : " (estimado)";
+  const est = custoFixo(p) ? "" : " (estimado)";
   return `<div class="row">
     <div class="main"><div class="t">${esc(p.cliente)}</div>
-      <div class="d">${q>1?q+"× ":""}${esc(p.camisa)} · ${TIPOS[p.tipo]?.nome||""} ${esc(p.tamanho||"")}${ex?" · "+esc(ex):""}</div>
-      <div class="d">Pedido em ${fmtD(p.dataPedido)}${pv}</div></div>
+      ${itensDe(p).map(it=>`<div class="d">${esc(nomeItem(it))}</div>`).join("")}
+      <div class="d">${n>1?n+" camisas · ":""}Pedido em ${fmtD(p.dataPedido)}${pv}</div></div>
     <div class="r"><div class="num" style="font-weight:600">${brl(v)}</div><div class="d num">lucro ${brl(v-c)}${est}</div></div>
     <div class="acts">
       <select class="st s-${p.status}" data-st="${p.id}" aria-label="Status de ${esc(p.cliente)}">${STATUS.map(([k,n])=>`<option value="${k}" ${k===p.status?"selected":""}>${n}</option>`).join("")}</select>
@@ -394,7 +420,7 @@ function rPedidos(){
   let l=S.pedidos.slice().sort((a,b)=>(b.dataPedido||"").localeCompare(a.dataPedido||"")||(b.criado||0)-(a.criado||0));
   if(f==="ativos") l=l.filter(p=>!["entregue","cancelado"].includes(p.status));
   else if(f!=="todos") l=l.filter(p=>p.status===f);
-  if(q) l=l.filter(p=>(p.cliente+" "+p.camisa+" "+(p.contato||"")).toLowerCase().includes(q));
+  if(q) l=l.filter(p=>(p.cliente+" "+camisasTxt(p)+" "+(p.contato||"")).toLowerCase().includes(q));
   const vazioTotal=!S.pedidos.length;
   const busca=document.activeElement&&document.activeElement.id==="busca";
   $("#v-pedidos").innerHTML = `
@@ -417,7 +443,7 @@ function rLotes(){
     const cs=TIPOS[t].custos;
     if(n>=cs.length) return `<p class="tip">${TIPOS[t].nome}: ${n} peças, já no menor custo (<b>${brl(cs[cs.length-1])}</b> cada).</p>`;
     const agora=custoUnit(t,n), dep=custoUnit(t,n+1), econ=n*(agora-dep);
-    return `<p class="tip">${TIPOS[t].nome}: ${n} peça${n>1?"s":""} a ${brl(agora)}. Com <b>+1 pedido</b> o custo cai pra <b>${brl(dep)}</b> e você economiza ${brl(econ)} nas que já tem.</p>`;
+    return `<p class="tip">${TIPOS[t].nome}: ${n} peça${n>1?"s":""} a ${brl(agora)}. Com <b>+1 camisa</b> o custo cai pra <b>${brl(dep)}</b> e você economiza ${brl(econ)} nas que já tem.</p>`;
   }).join("");
   const lotes=S.lotes.slice().sort((a,b)=>(b.data||"").localeCompare(a.data||""));
   $("#v-lotes").innerHTML = `
@@ -430,7 +456,7 @@ function rLotes(){
           <div class="kpi hi"><div class="lab">Lucro do lote</div><div class="val">${brl(r.lucro)}</div><div class="sub">de ${brl(r.receita)} recebidos</div></div>
         </div>
         ${dicas}
-        <div class="list" style="margin-top:12px">${fila.map(p=>`<div class="row"><div class="main"><div class="t">${esc(p.cliente)}</div><div class="d">${(p.qtd||1)>1?(p.qtd)+"× ":""}${esc(p.camisa)} · ${TIPOS[p.tipo].nome} ${esc(p.tamanho||"")}</div></div><div class="r num">${brl(valorPedido(p))}</div></div>`).join("")}</div>
+        <div class="list" style="margin-top:12px">${fila.map(p=>`<div class="row"><div class="main"><div class="t">${esc(p.cliente)}</div>${itensDe(p).map(it=>`<div class="d">${esc(nomeItem(it))}</div>`).join("")}</div><div class="r num">${brl(valorPedido(p))}</div></div>`).join("")}</div>
         <div id="fechar-area" style="margin-top:12px"><button class="btn pri" id="fechar">Encomendar este lote</button></div>`
       :`<div class="empty"><strong>Nenhum pedido pago esperando.</strong>Quando você marcar um pedido como “Pago”, ele entra aqui até você encomendar.</div>`}
     </div>
@@ -488,6 +514,7 @@ document.addEventListener("click", async e=>{
   const b=e.target.closest("button"); if(!b) return;
   const d=b.dataset;
   if(d.go) irPara(d.go);
+  if(d.mes){ const [y,m]=(S.mes||hoje().slice(0,7)).split("-").map(Number); const dt=new Date(y,m-1+Number(d.mes),1); S.mes=dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0"); render(); }
   if(d.ed) formPedido(S.pedidos.find(p=>p.id===d.ed));
   if(d.edi) formInteressado(S.interessados.find(i=>i.id===d.edi));
   if(d.avisei){ if(await atualizar("pedidos",d.avisei,{ultimoAviso:hoje()})) toast("Anotado: cliente avisado hoje"); }
@@ -505,17 +532,21 @@ async function fecharLote(btn){
   const fila=filaLote(), r=resumoLote(fila), id=novoId(), data=hoje();
   const pecas=Object.values(r.porTipo).reduce((a,b)=>a+b,0);
   if(!await salvar("lotes",id,{data,pecas,custo:Math.round(r.custo*100)/100,receita:Math.round(r.receita*100)/100,lucro:Math.round(r.lucro*100)/100,porTipo:r.porTipo})){ btn.disabled=false; return; }
-  for(const p of fila){ await atualizar("pedidos",p.id,{status:"encomendado",loteId:id,dataEncomenda:data,custoUnit:custoUnit(p.tipo,r.porTipo[p.tipo])}); }
+  for(const p of fila){
+    const itens=itensDe(p).map(it=>({...it,custoUnit:custoUnit(it.tipo,r.porTipo[it.tipo])}));
+    await atualizar("pedidos",p.id,{status:"encomendado",loteId:id,dataEncomenda:data,itens});
+  }
   toast("Lote encomendado. Previsão: até "+fmtD(previsao(data)));
 }
 
 async function copiarMsg(p){
   if(!p) return;
   const pv=previsao(p.dataEncomenda);
-  const txt=`Oi, ${p.cliente.split(" ")[0]}! Aqui é da Kabide10. Sua camisa ${p.camisa} já foi encomendada e está em produção. A previsão é chegar até ${pv?parseD(pv).toLocaleDateString("pt-BR"):"o fim do prazo"}. Assim que chegar eu te aviso pra combinarmos a entrega!`;
+  const txt=`Oi, ${p.cliente.split(" ")[0]}! Aqui é da Kabide10. ${pecasDe(p)>1?"Suas camisas ("+camisasTxt(p)+") já foram encomendadas":"Sua camisa "+camisasTxt(p)+" já foi encomendada"} ${pecasDe(p)>1?"e estão":"e está"} em produção. A previsão é chegar até ${pv?parseD(pv).toLocaleDateString("pt-BR"):"o fim do prazo"}. Assim que chegar eu te aviso pra combinarmos a entrega!`;
   try{ await navigator.clipboard.writeText(txt); toast("Mensagem copiada. Cole no WhatsApp do cliente."); }
   catch(_){ abrirModal(`<h2>Mensagem pro cliente</h2><div class="fld"><label for="msgtxt">Selecione e copie</label><textarea id="msgtxt" rows="6">${esc(txt)}</textarea></div><div class="sheet-acts"><span></span><button class="btn" data-close>Fechar</button></div>`); const ta=$("#msgtxt"); ta.focus(); ta.select(); }
 }
+
 
 /* ===== modal ===== */
 function abrirModal(html){ $("#modal").innerHTML=`<div class="ov" id="ov"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`; $("#ov").addEventListener("click",e=>{ if(e.target.id==="ov"||e.target.closest("[data-close]")) fecharModal(); }); }
@@ -523,50 +554,80 @@ function fecharModal(){ $("#modal").innerHTML=""; }
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") fecharModal(); });
 
 function formPedido(p, pre){
-  const ed=!!p; p=p||{tipo:"torcedor",qtd:1,extras:[],status:"aguardando",dataPedido:hoje(),...(pre||{})};
+  const ed=!!p; p=p||{status:"aguardando",dataPedido:hoje(),...(pre||{})};
+  let itens=(ed?itensDe(p):[{camisa:(pre&&pre.camisa)||"",tipo:"torcedor",tamanho:"G",extras:[],qtd:1}]).map(it=>({...it,extras:[...(it.extras||[])]}));
+  const juntar=[]; // pedidos do mesmo cliente que serão juntados neste
+  const mesmoCliente=()=>{ const n=($("#f-cliente")?.value||p.cliente||"").trim().toLowerCase(); if(!n) return [];
+    return S.pedidos.filter(o=>o.id!==p.id&&!juntar.includes(o.id)&&(o.cliente||"").trim().toLowerCase()===n&&!o.loteId&&!["entregue","cancelado"].includes(o.status)); };
   abrirModal(`<h2>${ed?"Editar pedido":"Novo pedido"}</h2>
     <form id="fp" class="sheet" style="padding:0;max-height:none;background:none">
       <div class="fld"><label for="f-cliente">Cliente</label><input id="f-cliente" required value="${esc(p.cliente)}" placeholder="Nome do cliente"></div>
       <div class="fld"><label for="f-contato">WhatsApp ou @</label><input id="f-contato" value="${esc(p.contato)}" placeholder="(64) 9…"></div>
-      <div class="fld"><label for="f-camisa">Camisa</label><input id="f-camisa" required value="${esc(p.camisa)}" placeholder="Ex.: Flamengo I 2026"></div>
+      <div class="fld"><label>Camisas do pedido</label><div id="f-itens" class="itens"></div>
+        <button type="button" class="btn" id="f-add">+ Adicionar outra camisa</button></div>
+      <div id="f-juntar"></div>
       <div class="two">
-        <div class="fld"><label for="f-tipo">Modelo</label><select id="f-tipo">${Object.entries(TIPOS).map(([k,T])=>`<option value="${k}" ${k===p.tipo?"selected":""}>${T.nome}</option>`).join("")}</select></div>
-        <div class="fld"><label for="f-tam">Tamanho</label><select id="f-tam">${["P","M","G","GG","XG","Infantil"].map(t=>`<option ${t===p.tamanho?"selected":""}>${t}</option>`).join("")}</select></div>
-      </div>
-      <div class="fld"><label>Adicionais</label><div class="chips">${Object.entries(EXTRAS).map(([k,E])=>`<label class="chip"><input type="checkbox" id="f-x-${k}" value="${k}" ${(p.extras||[]).includes(k)?"checked":""}>${E.nome} <span class="muted num">+${brl(E.preco)}</span></label>`).join("")}</div></div>
-      <div class="two">
-        <div class="fld"><label for="f-qtd">Quantidade</label><input id="f-qtd" type="number" min="1" max="50" value="${p.qtd||1}"></div>
         <div class="fld"><label for="f-data">Data do pedido</label><input id="f-data" type="date" value="${p.dataPedido||hoje()}"></div>
-      </div>
-      <div class="two">
-        <div class="fld"><label for="f-valor">Valor cobrado (R$)</label><input id="f-valor" type="number" step="0.01" min="0" value="${typeof p.valor==="number"?p.valor:""}" placeholder="pela tabela"></div>
         <div class="fld"><label for="f-status">Status</label><select id="f-status">${STATUS.map(([k,n])=>`<option value="${k}" ${k===p.status?"selected":""}>${n}</option>`).join("")}</select></div>
       </div>
+      <div class="fld"><label for="f-valor">Valor total cobrado (R$)</label><input id="f-valor" type="number" step="0.01" min="0" value="${typeof p.valor==="number"?p.valor:""}" placeholder="deixe vazio pra usar a tabela"></div>
       <div class="calc" id="f-calc"></div>
-      <div class="fld"><label for="f-obs">Observações</label><textarea id="f-obs" rows="2" placeholder="Nome e número, endereço, combinado de entrega…">${esc(p.obs)}</textarea></div>
+      <div class="fld"><label for="f-obs">Observações</label><textarea id="f-obs" rows="2" placeholder="Nome e número de cada camisa, endereço, combinado de entrega…">${esc(p.obs)}</textarea></div>
       <div class="sheet-acts">
         ${ed?`<span id="del-area"><button type="button" class="btn danger" id="f-del">Excluir</button></span>`:"<span></span>"}
         <span class="toolbar"><button type="button" class="btn" data-close>Cancelar</button><button class="btn pri" type="submit">${ed?"Salvar":"Registrar pedido"}</button></span>
       </div>
     </form>`);
-  const ler=()=>({tipo:$("#f-tipo").value,qtd:Math.max(1,parseInt($("#f-qtd").value)||1),extras:Object.keys(EXTRAS).filter(k=>$("#f-x-"+k).checked)});
-  const calc=()=>{ const x=ler(), tab=precoPeca(x)*x.qtd, vv=$("#f-valor").value, v=vv===""?tab:parseFloat(vv);
-    const c=(typeof p.custoUnit==="number"?p.custoUnit:custoUnit(x.tipo,1))*x.qtd+custoExtras(x)*x.qtd;
-    $("#f-calc").innerHTML=`<div><span>Preço pela tabela</span><span class="num">${brl(tab)}</span></div><div><span>Custo ${typeof p.custoUnit==="number"?"do lote":"se for avulso"}</span><span class="num">${brl(c)}</span></div><div><b>Lucro</b><b class="num">${brl(v-c)}</b></div>`; };
-  $("#fp").addEventListener("input",calc); calc();
-  $("#f-tipo").addEventListener("change",()=>{ if($("#f-tipo").value==="infantil") $("#f-tam").value="Infantil"; });
-  $("#f-tam").addEventListener("change",()=>{ $("#f-x-xg").checked = $("#f-tam").value==="XG"; calc(); });
+  const lerItens=()=>{ document.querySelectorAll("#f-itens .item").forEach((el,i)=>{ const it=itens[i]; if(!it) return;
+      it.camisa=el.querySelector('[data-k="camisa"]').value.trim(); it.tipo=el.querySelector('[data-k="tipo"]').value;
+      it.tamanho=el.querySelector('[data-k="tamanho"]').value; it.qtd=Math.max(1,parseInt(el.querySelector('[data-k="qtd"]').value)||1);
+      it.extras=Object.keys(EXTRAS).filter(k=>el.querySelector(`[data-x="${k}"]`).checked); }); };
+  const desenharItens=()=>{
+    $("#f-itens").innerHTML=itens.map((it,i)=>`<div class="item">
+      <div class="item-top"><b>Camisa ${i+1}</b>${itens.length>1?`<button type="button" class="btn sm danger" data-rm="${i}">Remover</button>`:""}</div>
+      <input data-k="camisa" aria-label="Camisa ${i+1}" placeholder="Ex.: Flamengo I 2026" value="${esc(it.camisa)}">
+      <div class="three">
+        <select data-k="tipo" aria-label="Modelo da camisa ${i+1}">${Object.entries(TIPOS).map(([k,T])=>`<option value="${k}" ${k===it.tipo?"selected":""}>${T.nome}</option>`).join("")}</select>
+        <select data-k="tamanho" aria-label="Tamanho da camisa ${i+1}">${["P","M","G","GG","XG","Infantil"].map(t=>`<option ${t===it.tamanho?"selected":""}>${t}</option>`).join("")}</select>
+        <input data-k="qtd" type="number" min="1" max="50" value="${it.qtd||1}" aria-label="Quantidade da camisa ${i+1}">
+      </div>
+      <div class="chips">${Object.entries(EXTRAS).map(([k,E])=>`<label class="chip"><input type="checkbox" data-x="${k}" ${(it.extras||[]).includes(k)?"checked":""}>${E.nome} <span class="muted num">+${brl(E.preco)}</span></label>`).join("")}</div>
+      <div class="item-v num">${brl(precoItem(it))}</div>
+    </div>`).join("");
+  };
+  const desenharJuntar=()=>{ const outros=mesmoCliente();
+    $("#f-juntar").innerHTML = outros.length ? `<div class="alert info"><div class="grow"><p>${esc(outros[0].cliente)} tem ${outros.length===1?"outro pedido aberto":outros.length+" outros pedidos abertos"}: ${outros.map(o=>esc(camisasTxt(o))).join("; ")}.</p></div><button type="button" class="btn sm" id="f-juntar-btn">Juntar neste</button></div>` : (juntar.length?`<p class="small muted" style="margin:0">${juntar.length} pedido${juntar.length>1?"s":""} juntado${juntar.length>1?"s":""} aqui. O antigo é apagado quando você salvar.</p>`:""); };
+  const calc=()=>{ lerItens(); document.querySelectorAll("#f-itens .item-v").forEach((el,i)=>el.textContent=brl(precoItem(itens[i])));
+    const tab=itens.reduce((a,it)=>a+precoItem(it),0), vv=$("#f-valor").value, v=vv===""?tab:parseFloat(vv), c=itens.reduce((a,it)=>a+custoItem(it),0), n=itens.reduce((a,it)=>a+it.qtd,0);
+    $("#f-calc").innerHTML=`<div><span>${n} camisa${n>1?"s":""} pela tabela</span><span class="num">${brl(tab)}</span></div><div><span>Custo ${itens.every(it=>typeof it.custoUnit==="number")?"do lote":"se for avulso"}</span><span class="num">${brl(c)}</span></div><div><b>Lucro</b><b class="num">${brl(v-c)}</b></div>`; };
+  desenharItens(); desenharJuntar(); calc();
+  $("#fp").addEventListener("input",calc);
+  $("#fp").addEventListener("change",e=>{ const el=e.target;
+    if(el.dataset.k==="tipo"&&el.value==="infantil"){ el.closest(".item").querySelector('[data-k="tamanho"]').value="Infantil"; }
+    if(el.dataset.k==="tamanho"){ el.closest(".item").querySelector('[data-x="xg"]').checked = el.value==="XG"; }
+    if(el.id==="f-cliente") desenharJuntar();
+    calc(); });
+  $("#fp").addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
+    if(b.id==="f-add"){ lerItens(); const ult=itens[itens.length-1]; itens.push({camisa:"",tipo:ult?ult.tipo:"torcedor",tamanho:ult?ult.tamanho:"G",extras:[],qtd:1}); desenharItens(); calc(); const ins=document.querySelectorAll('#f-itens [data-k="camisa"]'); ins[ins.length-1].focus(); }
+    if(b.dataset.rm){ lerItens(); itens.splice(Number(b.dataset.rm),1); desenharItens(); calc(); }
+    if(b.id==="f-juntar-btn"){ lerItens(); mesmoCliente().forEach(o=>{ itensDe(o).forEach(it=>itens.push({...it,extras:[...(it.extras||[])]})); juntar.push(o.id); if(typeof o.valor==="number"||typeof p.valor==="number") $("#f-valor").value=""; }); desenharItens(); desenharJuntar(); calc(); toast("Camisas juntadas. Confira e salve."); }
+  });
   if(ed) $("#f-del").addEventListener("click",()=>{ $("#del-area").innerHTML=`<button type="button" class="btn danger" id="f-del2">Confirmar exclusão</button>`; $("#f-del2").addEventListener("click",async()=>{ if(await apagar("pedidos",p.id)){ fecharModal(); toast("Pedido excluído"); } }); });
   $("#fp").addEventListener("submit",async e=>{
-    e.preventDefault(); const x=ler(), vv=$("#f-valor").value;
-    const data={...(ed?p:{}),cliente:$("#f-cliente").value.trim(),contato:$("#f-contato").value.trim(),camisa:$("#f-camisa").value.trim(),
-      tipo:x.tipo,tamanho:$("#f-tam").value,extras:x.extras,qtd:x.qtd,dataPedido:$("#f-data").value||hoje(),status:$("#f-status").value,obs:$("#f-obs").value.trim()};
-    delete data.id; delete data.deInteressado;
+    e.preventDefault(); lerItens();
+    if(itens.some(it=>!it.camisa)){ toast("Preencha o nome de todas as camisas."); return; }
+    const vv=$("#f-valor").value;
+    const data={...(ed?p:{}),cliente:$("#f-cliente").value.trim(),contato:$("#f-contato").value.trim(),
+      itens:itens.map(it=>{ const o={camisa:it.camisa,tipo:it.tipo,tamanho:it.tamanho,extras:it.extras,qtd:it.qtd}; if(typeof it.custoUnit==="number") o.custoUnit=it.custoUnit; return o; }),
+      dataPedido:$("#f-data").value||hoje(),status:$("#f-status").value,obs:$("#f-obs").value.trim()};
+    ["id","deInteressado","camisa","tipo","tamanho","extras","qtd","custoUnit"].forEach(k=>delete data[k]);
+    if(!data.cliente){ toast("Preencha o nome do cliente."); return; }
     if(vv==="") delete data.valor; else data.valor=Math.round(parseFloat(vv)*100)/100;
     if(!ed) data.criado=Date.now();
     if(data.status==="encomendado"&&!data.dataEncomenda) data.dataEncomenda=hoje();
     const id=ed?p.id:novoId();
     if(await salvar("pedidos",id,data)){
+      for(const oid of juntar) await apagar("pedidos",oid);
       if(pre&&pre.deInteressado) await atualizar("interessados",pre.deInteressado,{situacao:"comprou",pedidoId:id});
       fecharModal(); toast(ed?"Pedido salvo":"Pedido registrado");
     }
