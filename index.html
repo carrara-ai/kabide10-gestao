@@ -136,6 +136,10 @@ img{max-width:100%}
 :root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 .login{min-height:70vh;display:grid;place-items:center;text-align:center}
 .login .box{max-width:400px;width:100%;display:grid;gap:14px;padding:24px}
+.login-form{display:grid;gap:10px;text-align:left}
+.login-form .btn{padding:11px 12px}
+.ou{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px}
+.ou::before,.ou::after{content:"";flex:1;border-top:1px solid var(--line)}
 .capa{background:#0c0d0b;border-radius:12px;padding:22px 18px;display:grid;place-items:center}
 .capa img{width:100%;max-width:320px;height:auto;display:block}
 .user{margin-left:auto;display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted);text-transform:none;letter-spacing:0;min-width:0}
@@ -197,8 +201,15 @@ table.edit input{background:var(--bg);border:1px solid var(--line);border-radius
     <div class="box">
       <div class="capa"><img src="logo.png" alt="Kabide10 — Paixão que se veste" width="720" height="420"></div>
       <h2>Entrar</h2>
-      <p class="muted small" style="margin:0">Só as contas Google cadastradas da loja conseguem ver os pedidos.</p>
-      <button class="btn pri" id="entrar">Entrar com Google</button>
+      <p class="muted small" style="margin:0">Só as contas cadastradas da loja conseguem ver os pedidos.</p>
+      <form id="login-senha" class="login-form">
+        <div class="fld"><label for="l-email">E-mail</label><input id="l-email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false" required></div>
+        <div class="fld"><label for="l-senha">Senha</label><input id="l-senha" type="password" autocomplete="current-password" required></div>
+        <button class="btn pri" type="submit" id="l-ok">Entrar</button>
+      </form>
+      <div class="ou" id="login-ou"><span>ou</span></div>
+      <button class="btn" id="entrar">Entrar com Google</button>
+      <p class="small muted" id="login-dica" style="margin:0" hidden>No app da tela de início do iPhone, o login do Google não volta pro app. Use e-mail e senha.</p>
       <p class="small" id="login-msg" style="margin:0;color:var(--bad)" hidden></p>
     </div>
   </section>
@@ -229,7 +240,7 @@ const firebaseConfig = {
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 /* ===== Configuração padrão (a loja edita na aba Ajustes; fica salva em config/loja) ===== */
 const PADRAO = {
@@ -356,12 +367,28 @@ function mostrarApp(on){
 }
 function msgLogin(t){ const m=$("#login-msg"); m.textContent=t; m.hidden=!t; }
 
+/* app instalado na tela de início do iPhone: o login do Google abre fora e não volta, então o caminho é e-mail e senha */
+const APP_IPHONE = (navigator.standalone===true) || (/iPhone|iPad|iPod/.test(navigator.userAgent) && matchMedia("(display-mode: standalone)").matches);
+if(APP_IPHONE) $("#login-dica").hidden=false;
+const ERROS_LOGIN = {
+  "auth/invalid-credential":"E-mail ou senha errados.", "auth/wrong-password":"E-mail ou senha errados.", "auth/user-not-found":"E-mail ou senha errados.",
+  "auth/invalid-email":"Esse e-mail não está escrito certo.", "auth/too-many-requests":"Muitas tentativas. Espere alguns minutos e tente de novo.",
+  "auth/operation-not-allowed":"O login por e-mail e senha ainda não foi ativado no Firebase.", "auth/network-request-failed":"Sem internet. Confira a conexão e tente de novo.",
+  "auth/user-disabled":"Essa conta foi desativada no Firebase."
+};
+$("#login-senha").addEventListener("submit", async e=>{
+  e.preventDefault(); msgLogin("");
+  const b=$("#l-ok"); b.disabled=true; b.textContent="Entrando…";
+  try{ await signInWithEmailAndPassword(auth,$("#l-email").value.trim().toLowerCase(),$("#l-senha").value); }
+  catch(err){ msgLogin(ERROS_LOGIN[err.code]||("Não deu pra entrar: "+err.code)); }
+  b.disabled=false; b.textContent="Entrar";
+});
 $("#entrar").addEventListener("click", async ()=>{
   msgLogin("");
   const prov=new GoogleAuthProvider();
   try{ await signInWithPopup(auth,prov); }
   catch(e){
-    if(e.code==="auth/popup-blocked"||e.code==="auth/operation-not-supported-in-this-environment") await signInWithRedirect(auth,prov);
+    if(e.code==="auth/popup-blocked"||e.code==="auth/operation-not-supported-in-this-environment") msgLogin("O navegador bloqueou a janela do Google. Entre com e-mail e senha.");
     else if(e.code!=="auth/popup-closed-by-user"&&e.code!=="auth/cancelled-popup-request") msgLogin("Não deu pra entrar: "+e.code);
   }
 });
