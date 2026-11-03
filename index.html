@@ -17,7 +17,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
 <style>
-/* Layout: painel de loja em abas — Resumo, Pedidos, Lotes, Clientes, Despesas, Relatórios, Interessados, Ajustes — com cabeçalho fixo e botão flutuante */
+/* Layout: painel de loja em abas — Resumo, Pedidos, Lotes, Estoque, Clientes, Despesas, Relatórios, Interessados, Ajustes — com cabeçalho fixo e botão flutuante */
 :root{
   --bg:#0c0d0b; --panel:#151713; --panel-2:#1d201a; --line:#2c3027;
   --fg:#eef2e6; --muted:#9aa18f; --accent:#a6e600; --on-accent:#0c0d0b;
@@ -147,6 +147,10 @@ img{max-width:100%}
 
 
 .kpi .val.neg{color:var(--bad)}
+.s-estoque{color:var(--info)}
+.warn{color:var(--warn)}
+details.box>summary{color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.1em}
+.three .fld{min-width:0}
 .bar.big{height:12px;margin-top:8px}
 .bar-l{display:flex;justify-content:space-between;gap:8px;font-size:14px}
 .bar-l span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -187,6 +191,7 @@ table.edit input{background:var(--bg);border:1px solid var(--line);border-radius
       <button role="tab" data-v="resumo" aria-selected="true">Resumo</button>
       <button role="tab" data-v="pedidos">Pedidos<span class="cnt" id="c-ped"></span></button>
       <button role="tab" data-v="lotes">Lotes<span class="cnt" id="c-lot"></span></button>
+      <button role="tab" data-v="estoque">Estoque<span class="cnt" id="c-est"></span></button>
       <button role="tab" data-v="clientes">Clientes</button>
       <button role="tab" data-v="despesas">Despesas</button>
       <button role="tab" data-v="relatorios">Relatórios</button>
@@ -216,6 +221,7 @@ table.edit input{background:var(--bg);border:1px solid var(--line);border-radius
   <section class="view" id="v-resumo" hidden></section>
   <section class="view" id="v-pedidos" hidden></section>
   <section class="view" id="v-lotes" hidden></section>
+  <section class="view" id="v-estoque" hidden></section>
   <section class="view" id="v-clientes" hidden></section>
   <section class="view" id="v-despesas" hidden></section>
   <section class="view" id="v-relatorios" hidden></section>
@@ -336,7 +342,7 @@ function pagamentosDe(p){
 }
 
 /* ===== estado e banco ===== */
-const S = {pedidos:[], interessados:[], lotes:[], despesas:[], clientes:[], ready:{}, view:"resumo", filtro:"ativos", busca:"", buscaCli:"", mes:null};
+const S = {pedidos:[], interessados:[], lotes:[], despesas:[], clientes:[], estoque:[], ready:{}, view:"resumo", filtro:"ativos", busca:"", buscaCli:"", mes:null};
 let USER="";
 
 function toast(msg){ const t=$("#toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>t.hidden=true,2800); }
@@ -395,10 +401,10 @@ $("#entrar").addEventListener("click", async ()=>{
 $("#sair").addEventListener("click", ()=>signOut(auth));
 onAuthStateChanged(auth, user=>{
   unsubs.forEach(u=>u()); unsubs=[];
-  if(!user){ DB=null; ["pedidos","interessados","lotes","despesas","clientes"].forEach(c=>S[c]=[]); mostrarApp(false); return; }
+  if(!user){ DB=null; ["pedidos","interessados","lotes","despesas","clientes","estoque"].forEach(c=>S[c]=[]); mostrarApp(false); return; }
   USER=user.email; $("#user-email").textContent=user.email; DB=fs; mostrarApp(true); render();
   const falha = e => { if(e.code==="permission-denied"){ signOut(auth); msgLogin("A conta "+user.email+" não tem acesso à loja."); } else erroDb(e); };
-  ["pedidos","interessados","lotes","despesas","clientes"].forEach(col=>{
+  ["pedidos","interessados","lotes","despesas","clientes","estoque"].forEach(col=>{
     unsubs.push(onSnapshot(collection(fs,col), snap=>{
       S[col]=snap.docs.map(d=>({id:d.id,...d.data()}));
       S.ready[col]=true; render();
@@ -408,11 +414,11 @@ onAuthStateChanged(auth, user=>{
 });
 
 /* ===== navegação ===== */
-const VIEWS=["resumo","pedidos","lotes","clientes","despesas","relatorios","interessados","ajustes"];
+const VIEWS=["resumo","pedidos","lotes","estoque","clientes","despesas","relatorios","interessados","ajustes"];
 $("#tabs").addEventListener("click", e=>{ const b=e.target.closest("button[data-v]"); if(!b) return; irPara(b.dataset.v); });
 function ajustarFab(){
   const v=S.view, f=$("#fab");
-  f.textContent = v==="interessados" ? "+ Interessado" : v==="despesas" ? "+ Despesa" : "+ Pedido";
+  f.textContent = v==="interessados" ? "+ Interessado" : v==="despesas" ? "+ Despesa" : v==="estoque" ? "+ Estoque" : "+ Pedido";
   f.hidden = !DB || ["clientes","relatorios","ajustes"].includes(v);
 }
 function irPara(v){
@@ -422,17 +428,24 @@ function irPara(v){
   ajustarFab(); window.scrollTo(0,0); render();
 }
 if(VIEWS.includes(location.hash.slice(1))) setTimeout(()=>irPara(location.hash.slice(1)),0);
-$("#fab").addEventListener("click", ()=> S.view==="interessados" ? formInteressado() : S.view==="despesas" ? formDespesa() : formPedido());
+$("#fab").addEventListener("click", ()=> S.view==="interessados" ? formInteressado() : S.view==="despesas" ? formDespesa() : S.view==="estoque" ? formEstoque() : formPedido());
 const navMes = () => { if(!S.mes) S.mes=mesAtual(); return `<div class="mesnav"><button class="btn sm" data-mes="-1" aria-label="Mês anterior">‹</button><span>${nomeDoMes(S.mes)}</span><button class="btn sm" data-mes="1" aria-label="Próximo mês" ${S.mes===mesAtual()?"disabled":""}>›</button></div>`; };
 
 /* ===== regras do dia a dia ===== */
-function filaLote(){ return S.pedidos.filter(p=>!p.loteId && (p.status==="pago" || (p.status==="aguardando" && recebidoDe(p)>0))); }
-function resumoLote(peds){
+function filaLote(){ return S.pedidos.filter(p=>!p.loteId && !p.prontaEntrega && (p.status==="pago" || (p.status==="aguardando" && recebidoDe(p)>0))); }
+/* estoque: camisas compradas sem cliente. planejado = vai no próximo lote; encomendado = a caminho; disponivel = comigo; esgotado = vendeu tudo */
+const estPlanejado = () => S.estoque.filter(e=>e.status==="planejado");
+const estDisponivel = () => S.estoque.filter(e=>e.status==="disponivel"&&(e.qtd||0)>0);
+const custoEst = e => ((typeof e.custoUnit==="number"?e.custoUnit:custoUnit(e.tipo,1))+custoExtras(e))*(e.qtd||0);
+function resumoLote(peds, est){
+  est=est||[];
   const porTipo={};
   peds.forEach(p=>itensDe(p).forEach(it=>{ porTipo[it.tipo]=(porTipo[it.tipo]||0)+(it.qtd||1); }));
-  let custo=0, receita=0;
-  peds.forEach(p=>{ itensDe(p).forEach(it=>{ custo+=(custoUnit(it.tipo,porTipo[it.tipo])+custoExtras(it))*(it.qtd||1); }); receita+=valorPedido(p); });
-  return {porTipo, custo, receita, lucro:receita-custo};
+  est.forEach(e=>{ porTipo[e.tipo]=(porTipo[e.tipo]||0)+(e.qtd||1); });
+  let custoPed=0, custoE=0, receita=0;
+  peds.forEach(p=>{ itensDe(p).forEach(it=>{ custoPed+=(custoUnit(it.tipo,porTipo[it.tipo])+custoExtras(it))*(it.qtd||1); }); receita+=valorPedido(p); });
+  est.forEach(e=>{ custoE+=(custoUnit(e.tipo,porTipo[e.tipo])+custoExtras(e))*(e.qtd||1); });
+  return {porTipo, custo:custoPed+custoE, custoPed, custoEst:custoE, pecasEst:est.reduce((a,e)=>a+(e.qtd||1),0), receita, lucro:receita-custoPed};
 }
 function precisaAviso(p){ if(p.status!=="encomendado") return false; const base=p.ultimoAviso||p.dataEncomenda; return !!base && diasEntre(base,hoje())>=(CFG.diasAviso||5); }
 function atrasado(p){ if(p.status!=="encomendado") return false; const pv=previsao(p.dataEncomenda); return pv && pv<hoje(); }
@@ -440,9 +453,10 @@ function atrasado(p){ if(p.status!=="encomendado") return false; const pv=previs
 /* ===== render ===== */
 function render(){
   $("#c-ped").textContent = S.pedidos.filter(p=>!["entregue","cancelado"].includes(p.status)).length||"";
-  $("#c-lot").textContent = filaLote().length||"";
+  $("#c-lot").textContent = (filaLote().length+estPlanejado().length)||"";
+  $("#c-est").textContent = estDisponivel().reduce((a,e)=>a+(e.qtd||0),0)||"";
   $("#c-int").textContent = S.interessados.filter(i=>i.situacao==="aberto").length||"";
-  ({resumo:rResumo,pedidos:rPedidos,lotes:rLotes,clientes:rClientes,despesas:rDespesas,relatorios:rRelatorios,interessados:rInteressados,ajustes:rAjustes})[S.view]();
+  ({resumo:rResumo,pedidos:rPedidos,lotes:rLotes,estoque:rEstoque,clientes:rClientes,despesas:rDespesas,relatorios:rRelatorios,interessados:rInteressados,ajustes:rAjustes})[S.view]();
 }
 
 /* ----- Resumo ----- */
@@ -538,7 +552,7 @@ function rPedidos(){
 
 /* ----- Lotes ----- */
 function rLotes(){
-  const fila=filaLote(), r=resumoLote(fila);
+  const fila=filaLote(), plan=estPlanejado(), r=resumoLote(fila,plan);
   const dicas=Object.entries(r.porTipo).map(([t,n])=>{
     const cs=TIPOS[t].custos;
     if(n>=cs.length) return `<p class="tip">${TIPOS[t].nome}: ${n} peças, já no menor custo (<b>${brl(cs[cs.length-1])}</b> cada).</p>`;
@@ -548,42 +562,133 @@ function rLotes(){
   const lotes=S.lotes.slice().sort((a,b)=>(b.data||"").localeCompare(a.data||""));
   $("#v-lotes").innerHTML = `
     <div class="box"><h2>Próximo lote</h2>
-      <p class="muted small" style="margin:4px 0 12px">Pedidos pagos (ou com sinal) que ainda não foram encomendados. Quanto mais peças do mesmo tipo, menor o custo de cada uma.</p>
-      ${fila.length?`
+      <p class="muted small" style="margin:4px 0 12px">Pedidos pagos (ou com sinal) que ainda não foram encomendados, mais as camisas que você vai pedir pro estoque. Quanto mais peças do mesmo tipo, menor o custo de cada uma.</p>
+      ${fila.length||plan.length?`
         <div class="kpis" style="margin-bottom:10px">
-          <div class="kpi"><div class="lab">Peças</div><div class="val">${Object.values(r.porTipo).reduce((a,b)=>a+b,0)}</div></div>
-          <div class="kpi"><div class="lab">Custo no fornecedor</div><div class="val">${brl(r.custo)}</div></div>
-          <div class="kpi hi"><div class="lab">Lucro do lote</div><div class="val">${brl(r.lucro)}</div><div class="sub">de ${brl(r.receita)} em vendas</div></div>
+          <div class="kpi"><div class="lab">Peças</div><div class="val">${Object.values(r.porTipo).reduce((a,b)=>a+b,0)}</div><div class="sub">${r.pecasEst?`${Object.values(r.porTipo).reduce((a,b)=>a+b,0)-r.pecasEst} de pedidos · ${r.pecasEst} pro estoque`:"todas de pedidos"}</div></div>
+          <div class="kpi"><div class="lab">Custo no fornecedor</div><div class="val">${brl(r.custo)}</div><div class="sub">${r.custoEst?`${brl(r.custoEst)} é o estoque`:"&nbsp;"}</div></div>
+          <div class="kpi hi"><div class="lab">Lucro dos pedidos</div><div class="val">${brl(r.lucro)}</div><div class="sub">${fila.length?`de ${brl(r.receita)} em vendas`:"o estoque dá lucro quando vender"}</div></div>
         </div>
         ${dicas}
-        <div class="list" style="margin-top:12px">${fila.map(p=>`<div class="row"><div class="main"><div class="t"><span class="muted num">${num(p.numero)}</span> ${esc(p.cliente)} ${p.status==="aguardando"?'<span class="pill s-aguardando">Só sinal</span>':""}</div>${itensDe(p).map(it=>`<div class="d">${esc(nomeItem(it))}</div>`).join("")}</div><div class="r num">${brl(valorPedido(p))}</div></div>`).join("")}</div>
+        <div class="list" style="margin-top:12px">${fila.map(p=>`<div class="row"><div class="main"><div class="t"><span class="muted num">${num(p.numero)}</span> ${esc(p.cliente)} ${p.status==="aguardando"?'<span class="pill s-aguardando">Só sinal</span>':""}</div>${itensDe(p).map(it=>`<div class="d">${esc(nomeItem(it))}</div>`).join("")}</div><div class="r num">${brl(valorPedido(p))}</div></div>`).join("")}
+        ${plan.map(e=>`<div class="row"><div class="main"><div class="t"><span class="pill s-estoque">Estoque</span> ${esc(e.camisa)}</div><div class="d">${esc(nomeItem({...e,camisa:""}).replace(/^\s*·\s*/,""))}</div></div><div class="r num">${e.qtd}×</div><div class="acts"><button class="btn sm" data-ede="${e.id}">Editar</button></div></div>`).join("")}</div>
         <div id="fechar-area" style="margin-top:12px"><button class="btn pri" id="fechar">Encomendar este lote</button></div>`
-      :`<div class="empty"><strong>Nenhum pedido esperando encomenda.</strong>Quando um pedido for pago ou tiver sinal, ele entra aqui até você encomendar.</div>`}
+      :`<div class="empty"><strong>Nada esperando encomenda.</strong>Pedidos pagos ou com sinal entram aqui sozinhos. Pra pedir camisas sem cliente, use o botão abaixo.</div>`}
+      <div class="toolbar" style="margin-top:12px"><button class="btn" id="add-est-lote">+ Camisas pro estoque</button></div>
     </div>
     <div class="box"><h3>Lotes encomendados</h3>
       ${lotes.length?`<div class="list">${lotes.map(rLoteFeito).join("")}</div>`:`<p class="muted small" style="margin:0">Nenhum lote encomendado ainda.</p>`}
     </div>`;
 }
 function rLoteFeito(l){
-  const peds=S.pedidos.filter(p=>p.loteId===l.id);
-  const fim=peds.length&&peds.every(p=>["recebido","entregue","cancelado"].includes(p.status));
-  const chegada=peds.map(p=>p.dataChegada).filter(Boolean).sort()[0];
+  const peds=S.pedidos.filter(p=>p.loteId===l.id), est=S.estoque.filter(e=>e.loteId===l.id);
+  const fim=(peds.length||est.length)&&peds.every(p=>["recebido","entregue","cancelado"].includes(p.status))&&est.every(e=>e.status!=="encomendado");
+  const chegada=[...peds.map(p=>p.dataChegada),...est.map(e=>e.dataChegada)].filter(Boolean).sort()[0];
   return `<div class="row"><div class="main"><div class="t">Lote de ${fmtD(l.data)}</div>
-    <div class="d">${l.pecas} peças · custo ${brl(l.custo)} · lucro ${brl(l.lucro)}</div>
+    <div class="d">${l.pecas} peças${l.pecasEstoque?` (${l.pecasEstoque} pro estoque)`:""} · custo ${brl(l.custo)} · lucro dos pedidos ${brl(l.lucro)}</div>
     <div class="d">${fim?`Chegou${chegada?" em "+fmtD(chegada)+" ("+diasEntre(l.data,chegada)+" dias)":""}`:"Previsão de chegada: até "+fmtD(previsao(l.data))}</div></div>
     <div class="r">${fim?`<span class="pill s-recebido">Chegou</span>`:`<button class="btn sm" data-chegou="${l.id}">Marcar como chegou</button>`}</div>
 </div>`;
 }
 async function fecharLote(btn){
   btn.disabled=true;
-  const fila=filaLote(), r=resumoLote(fila), id=novoId(), data=hoje();
+  const fila=filaLote(), plan=estPlanejado(), r=resumoLote(fila,plan), id=novoId(), data=hoje();
+  if(!fila.length&&!plan.length){ btn.disabled=false; return; }
   const pecas=Object.values(r.porTipo).reduce((a,b)=>a+b,0);
-  if(!await salvar("lotes",id,{data,pecas,custo:r2(r.custo),receita:r2(r.receita),lucro:r2(r.lucro),porTipo:r.porTipo,por:USER})){ btn.disabled=false; return; }
+  if(!await salvar("lotes",id,{data,pecas,custo:r2(r.custo),receita:r2(r.receita),lucro:r2(r.lucro),pecasEstoque:r.pecasEst,custoEstoque:r2(r.custoEst),porTipo:r.porTipo,por:USER})){ btn.disabled=false; return; }
+  for(const e of plan){ await atualizar("estoque",e.id,{status:"encomendado",loteId:id,dataEncomenda:data,custoUnit:custoUnit(e.tipo,r.porTipo[e.tipo])}); }
   for(const p of fila){
     const itens=itensDe(p).map(it=>({...it,custoUnit:custoUnit(it.tipo,r.porTipo[it.tipo])}));
     await mudarPedido(p,{status:"encomendado",loteId:id,dataEncomenda:data,itens},"Encomendado no lote de "+fmtD(data));
   }
   toast("Lote encomendado. Previsão: até "+fmtD(previsao(data)));
+}
+
+
+/* ----- Estoque ----- */
+async function devolverEstoque(p){
+  for(const it of itensDe(p).filter(x=>x.estoqueId)){
+    const e=S.estoque.find(x=>x.id===it.estoqueId); if(!e) continue;
+    await atualizar("estoque",e.id,{qtd:(e.qtd||0)+(it.qtd||1),status:"disponivel",vendas:(e.vendas||[]).filter(v=>v.pedidoId!==p.id)});
+  }
+}
+const SIT_EST={planejado:"No próximo lote",encomendado:"A caminho",disponivel:"Comigo",esgotado:"Esgotado"};
+function linhaEst(e){
+  const desc=[TIPOS[e.tipo]?.nome, e.tamanho, ...(e.extras||[]).filter(x=>x!=="xg").map(x=>EXTRAS[x]?.nome)].filter(Boolean).join(" · ");
+  const un=(typeof e.custoUnit==="number"?e.custoUnit:custoUnit(e.tipo,1))+custoExtras(e);
+  const sub = e.status==="encomendado" ? `chega até ${fmtD(previsao(e.dataEncomenda))}` : e.status==="disponivel" ? `chegou em ${fmtD(e.dataChegada)}${e.dataChegada&&diasEntre(e.dataChegada,hoje())>=30?` · <b class="warn">parada há ${diasEntre(e.dataChegada,hoje())} dias</b>`:""}` : e.status==="planejado" ? "entra no próximo lote" : `vendida${(e.vendas||[]).length>1?"s":""}`;
+  const vend=(e.vendas||[]).length?`<div class="d">Vendas: ${e.vendas.map(v=>`${num(v.numero)} ${esc(v.cliente)} (${v.qtd})`).join(", ")}</div>`:"";
+  return `<div class="row"><div class="main"><div class="t">${esc(e.camisa)}</div><div class="d">${esc(desc)}</div><div class="d">${sub}${typeof e.custoUnit==="number"||e.status!=="planejado"?` · custo ${brl(un)} cada · vende por ${brl(precoPeca(e))}`:""}</div>${vend}</div>
+    <div class="r"><div class="num" style="font-weight:600;font-size:18px">${e.qtd||0}</div><div class="d">${(e.qtd||0)===1?"camisa":"camisas"}</div></div>
+    <div class="acts">${e.status==="disponivel"&&(e.qtd||0)>0?`<button class="btn sm pri" data-vender="${e.id}">Vender</button>`:""}<button class="btn sm" data-ede="${e.id}">Editar</button></div></div>`;
+}
+function rEstoque(){
+  const disp=estDisponivel(), cam=S.estoque.filter(e=>e.status==="encomendado"), plan=estPlanejado(), esg=S.estoque.filter(e=>e.status==="esgotado"||(e.status==="disponivel"&&!(e.qtd>0)));
+  const soma=l=>l.reduce((a,e)=>a+(e.qtd||0),0);
+  const parado=disp.reduce((a,e)=>a+custoEst(e),0), potencial=disp.reduce((a,e)=>a+precoPeca(e)*(e.qtd||0),0);
+  const ord=l=>l.slice().sort((a,b)=>(a.camisa||"").localeCompare(b.camisa||""));
+  const bloco=(t,l,vazio)=>`<div class="box"><h3>${t}</h3>${l.length?`<div class="list">${ord(l).map(linhaEst).join("")}</div>`:`<p class="muted small" style="margin:0">${vazio}</p>`}</div>`;
+  $("#v-estoque").innerHTML=`
+    <div class="kpis">
+      <div class="kpi hi"><div class="lab">Comigo</div><div class="val">${soma(disp)}</div><div class="sub">camisas prontas pra vender</div></div>
+      <div class="kpi"><div class="lab">Dinheiro parado</div><div class="val">${brl(parado)}</div><div class="sub">vale ${brl(potencial)} vendendo pela tabela</div></div>
+      <div class="kpi"><div class="lab">A caminho</div><div class="val">${soma(cam)}</div><div class="sub">${soma(plan)} no próximo lote</div></div>
+    </div>
+    ${!S.estoque.length?`<div class="empty"><strong>Nenhuma camisa no estoque.</strong>Toque em “+ Estoque” pra adicionar camisas sem cliente. Escolha “No próximo lote” e elas entram junto com os pedidos, contando pro desconto do fornecedor.</div>`:`
+    ${bloco("Comigo, pra vender",disp,"Nenhuma camisa disponível agora.")}
+    ${bloco("A caminho",cam,"Nada a caminho.")}
+    ${bloco("No próximo lote",plan,"Nenhuma camisa de estoque esperando encomenda.")}
+    ${esg.length?`<details class="box"><summary>Esgotadas (${esg.length})</summary><div class="list" style="margin-top:10px">${ord(esg).map(linhaEst).join("")}</div></details>`:""}`}`;
+}
+function formEstoque(e, sitInicial){
+  const ed=!!e; e=e||{tipo:"torcedor",tamanho:"G",extras:[],qtd:1,status:sitInicial||"planejado"};
+  const travado=ed&&e.status!=="planejado"; // já foi encomendado: custo do lote travado
+  abrirModal(`<h2>${ed?"Camisa do estoque":"Camisas pro estoque"}</h2>
+    <p class="tip" style="margin:0">Uma linha por modelo e tamanho. Ex.: 3 Brasil I torcedor G = uma linha com quantidade 3.</p>
+    <form id="fe" class="sheet" style="padding:0;max-height:none;background:none">
+      <div class="fld"><label for="e-camisa">Camisa</label><input id="e-camisa" required value="${esc(e.camisa)}" placeholder="Ex.: Brasil I 2026"></div>
+      <div class="three">
+        <div class="fld"><label for="e-tipo">Versão</label><select id="e-tipo" ${travado?"disabled":""}>${Object.entries(TIPOS).map(([k,T])=>`<option value="${k}" ${k===e.tipo?"selected":""}>${T.nome}</option>`).join("")}</select></div>
+        <div class="fld"><label for="e-tam">Tamanho</label><select id="e-tam">${TAMANHOS.map(t=>`<option ${t===e.tamanho?"selected":""}>${t}</option>`).join("")}</select></div>
+        <div class="fld"><label for="e-qtd">Qtd</label><input id="e-qtd" type="number" min="0" max="99" value="${e.qtd??1}"></div>
+      </div>
+      <div class="fld"><label>Adicionais</label><div class="chips">${Object.entries(EXTRAS).map(([k,E])=>`<label class="chip"><input type="checkbox" data-ex="${k}" ${(e.extras||[]).includes(k)?"checked":""} ${travado?"disabled":""}>${E.nome}</label>`).join("")}</div></div>
+      <div class="two">
+        <div class="fld"><label for="e-sit">Situação</label><select id="e-sit" ${ed&&e.status!=="planejado"&&e.status!=="disponivel"?"disabled":""}>${["planejado","encomendado","disponivel"].concat(e.status==="esgotado"?["esgotado"]:[]).map(k=>`<option value="${k}" ${k===e.status?"selected":""}>${SIT_EST[k]}</option>`).join("")}</select></div>
+        <div class="fld" id="e-custo-w"><label for="e-custo">Custo de cada (R$)</label><input id="e-custo" type="number" step="0.01" min="0" value="${typeof e.custoUnit==="number"?e.custoUnit:""}" placeholder="${brl(custoUnit(e.tipo,1)).replace("R$","").trim()}" ${travado&&e.loteId?"disabled":""}></div>
+      </div>
+      <p class="tip" id="e-dica" style="margin:0"></p>
+      <div class="fld"><label for="e-obs">Observações</label><input id="e-obs" value="${esc(e.obs)}"></div>
+      <div class="sheet-acts">
+        ${ed&&!(e.vendas||[]).length?`<span id="dele-area"><button type="button" class="btn danger" id="e-del">Excluir</button></span>`:"<span></span>"}
+        <span class="toolbar"><button type="button" class="btn" data-close>Cancelar</button><button class="btn pri" type="submit">Salvar</button></span>
+      </div>
+    </form>`);
+  const dica=()=>{ const sit=$("#e-sit").value;
+    $("#e-custo-w").hidden = sit==="planejado";
+    $("#e-dica").innerHTML = sit==="planejado" ? "Vai aparecer na aba <b>Lotes</b> e entra no próximo pedido ao fornecedor, junto com os pedidos de clientes. O custo é calculado pelo tamanho do lote."
+      : sit==="encomendado" ? "Já encomendou fora de um lote do sistema. Quando chegar, mude a situação pra <b>Comigo</b>."
+      : "Já está com você, pronta pra vender."; };
+  $("#e-sit").addEventListener("change",dica); dica();
+  $("#e-tam").addEventListener("change",()=>{ const x=document.querySelector('[data-ex="xg"]'); if(x&&!x.disabled) x.checked=$("#e-tam").value==="XG"; });
+  if(ed&&$("#e-del")) $("#e-del").addEventListener("click",()=>{ $("#dele-area").innerHTML=`<button type="button" class="btn danger" id="e-del2">Confirmar exclusão</button>`; $("#e-del2").addEventListener("click",async()=>{ if(await apagar("estoque",e.id)){ fecharModal(); toast("Removido do estoque"); } }); });
+  $("#fe").addEventListener("submit",async ev=>{
+    ev.preventDefault();
+    const camisa=$("#e-camisa").value.trim(); if(!camisa){ toast("Preencha o nome da camisa."); return; }
+    const qtd=Math.max(0,parseInt($("#e-qtd").value)||0); if(!ed&&qtd<1){ toast("Coloque a quantidade."); return; }
+    const sit=$("#e-sit").value, cu=parseFloat($("#e-custo").value);
+    const data={...(ed?e:{}),camisa,tipo:$("#e-tipo").value,tamanho:$("#e-tam").value,qtd,
+      extras:Object.keys(EXTRAS).filter(k=>document.querySelector(`[data-ex="${k}"]`).checked),
+      status: sit==="disponivel"&&qtd===0 ? "esgotado" : sit, obs:$("#e-obs").value.trim(), por:USER};
+    delete data.id;
+    if(!ed){ data.criado=Date.now(); data.qtdInicial=qtd; data.vendas=[]; }
+    if(sit!=="planejado"){ if(cu>0) data.custoUnit=r2(cu); else if(typeof data.custoUnit!=="number") data.custoUnit=custoUnit(data.tipo,1); }
+    else { delete data.custoUnit; delete data.loteId; }
+    if(sit==="encomendado"&&!data.dataEncomenda) data.dataEncomenda=hoje();
+    if(sit==="disponivel"&&!data.dataChegada) data.dataChegada=hoje();
+    if(await salvar("estoque",ed?e.id:novoId(),data)){ fecharModal(); toast(sit==="planejado"?"Adicionado ao próximo lote":"Estoque salvo"); }
+  });
+  if(!ed) $("#e-camisa").focus();
 }
 
 /* ----- Clientes e fidelidade ----- */
@@ -655,7 +760,7 @@ function rRelatorios(){
   const maxF=Math.max(1,...porMes.map(x=>x.fat));
   const cont=(fn)=>{ const c={}; vend.forEach(p=>itensDe(p).forEach(it=>{ const k=fn(it); if(k) c[k]=(c[k]||0)+(it.qtd||1); })); return Object.entries(c).sort((a,b)=>b[1]-a[1]); };
   const camisas=cont(it=>it.camisa.trim()).slice(0,8), tamanhos=cont(it=>it.tamanho), versoes=cont(it=>TIPOS[it.tipo]?.nome);
-  const prazos=S.pedidos.filter(p=>p.dataEncomenda&&p.dataChegada).map(p=>diasEntre(p.dataEncomenda,p.dataChegada)).filter(d=>d>=0);
+  const prazos=[...S.pedidos.filter(p=>!p.prontaEntrega),...S.estoque].filter(p=>p.dataEncomenda&&p.dataChegada).map(p=>diasEntre(p.dataEncomenda,p.dataChegada)).filter(d=>d>=0);
   const media=prazos.length?Math.round(prazos.reduce((a,b)=>a+b,0)/prazos.length):null;
   const prometido=previsao("2026-01-05")?diasEntre("2026-01-05",previsao("2026-01-05")):0;
   const ticket=vend.length?vend.reduce((a,p)=>a+valorPedido(p),0)/vend.length:0;
@@ -762,7 +867,8 @@ document.addEventListener("change", async e=>{
     if(t.value==="encomendado"&&!p.dataEncomenda) ch.dataEncomenda=hoje();
     if(t.value==="recebido"&&!p.dataChegada) ch.dataChegada=hoje();
     if(t.value==="entregue"){ ch.dataEntrega=hoje(); if(!p.dataChegada) ch.dataChegada=hoje(); }
-    if(await mudarPedido(p,ch,"Status: "+STATUS_NOME[t.value])) toast("Status: "+STATUS_NOME[t.value]); }
+    if(t.value==="cancelado"&&p.prontaEntrega&&!p.estoqueDevolvido){ await devolverEstoque(p); ch.estoqueDevolvido=true; }
+    if(await mudarPedido(p,ch,"Status: "+STATUS_NOME[t.value])) toast(t.value==="cancelado"&&p.prontaEntrega?"Cancelado. As camisas voltaram pro estoque.":"Status: "+STATUS_NOME[t.value]); }
 });
 document.addEventListener("input", e=>{
   if(e.target.id==="busca-cli"){ S.buscaCli=e.target.value; clearTimeout(rClientes._t); rClientes._t=setTimeout(rClientes,150); }
@@ -781,11 +887,16 @@ document.addEventListener("click", async e=>{
   if(d.msg) copiarMsg(S.pedidos.find(p=>p.id===d.msg));
   if(d.virou){ const i=S.interessados.find(x=>x.id===d.virou); formPedido(null,{cliente:i.nome,contato:i.contato||"",camisa:i.camisa||"",deInteressado:i.id}); }
   if(d.desist) formInteressado(S.interessados.find(i=>i.id===d.desist),"desistiu");
-  if(d.chegou){ const peds=S.pedidos.filter(p=>p.loteId===d.chegou&&p.status==="encomendado"); for(const p of peds){ await mudarPedido(p,{status:"recebido",dataChegada:hoje()},"Chegou"); } toast(peds.length+" pedido(s) marcados como chegou"); }
+  if(d.chegou){ const peds=S.pedidos.filter(p=>p.loteId===d.chegou&&p.status==="encomendado"); for(const p of peds){ await mudarPedido(p,{status:"recebido",dataChegada:hoje()},"Chegou"); }
+    const est=S.estoque.filter(e=>e.loteId===d.chegou&&e.status==="encomendado"); for(const e of est){ await atualizar("estoque",e.id,{status:"disponivel",dataChegada:hoje()}); }
+    toast(`${peds.length} pedido(s) chegaram${est.length?` e ${est.reduce((a,e)=>a+(e.qtd||0),0)} camisa(s) entraram no estoque`:""}`); }
+  if(b.id==="add-est-lote") formEstoque(null,"planejado");
+  if(d.ede) formEstoque(S.estoque.find(x=>x.id===d.ede));
+  if(d.vender){ const e=S.estoque.find(x=>x.id===d.vender); if(e) formPedido(null,{deEstoque:e}); }
   if(d.premio){ const k=docCliente(d.premio), reg={...(S.clientes.find(x=>x.id===k)||{})}; delete reg.id; if(await salvar("clientes",k,{...reg,chave:d.premio,premiosUsados:(reg.premiosUsados||0)+1,ultimoPremio:hoje(),por:USER})) toast("Prêmio marcado como entregue"); }
   if(b.id==="backup") baixarBackup(b);
   if(b.id==="numerar") numerarAntigos(b);
-  if(b.id==="fechar"){ $("#fechar-area").innerHTML=`<p class="small" style="margin:0 0 8px">Confirma que você fez a encomenda desses pedidos no fornecedor hoje? Os custos ficam travados com o valor do lote.</p><div class="toolbar"><button class="btn pri" id="fechar-ok">Sim, encomendei</button><button class="btn" id="fechar-no">Cancelar</button></div>`; }
+  if(b.id==="fechar"){ $("#fechar-area").innerHTML=`<p class="small" style="margin:0 0 8px">Confirma que você fez a encomenda dessas camisas no fornecedor hoje? Os custos ficam travados com o valor do lote.</p><div class="toolbar"><button class="btn pri" id="fechar-ok">Sim, encomendei</button><button class="btn" id="fechar-no">Cancelar</button></div>`; }
   if(b.id==="fechar-no") rLotes();
   if(b.id==="fechar-ok") fecharLote(b);
 });
@@ -836,21 +947,25 @@ function formPagamento(p){
 }
 
 function formPedido(p, pre){
-  const ed=!!p; p=p||{status:"aguardando",dataPedido:hoje(),...(pre||{})};
-  let itens=(ed?itensDe(p):[{camisa:(pre&&pre.camisa)||"",tipo:"torcedor",tamanho:"G",extras:[],qtd:1}]).map(it=>({...it,extras:[...(it.extras||[])]}));
+  const ed=!!p, est=pre&&pre.deEstoque;
+  p=p||{status:est?"recebido":"aguardando",dataPedido:hoje(),...(pre||{})};
+  if(est){ p.prontaEntrega=true; delete p.deEstoque; }
+  const pronta=!!p.prontaEntrega;
+  let itens=(ed?itensDe(p):[est?{camisa:est.camisa,tipo:est.tipo,tamanho:est.tamanho,extras:[...(est.extras||[])],qtd:1,custoUnit:typeof est.custoUnit==="number"?est.custoUnit:custoUnit(est.tipo,1),estoqueId:est.id}:{camisa:(pre&&pre.camisa)||"",tipo:"torcedor",tamanho:"G",extras:[],qtd:1}]).map(it=>({...it,extras:[...(it.extras||[])]}));
   let pags=(ed?pagamentosDe(p):[]).map(x=>({...x}));
   /* pedidos antigos guardavam o valor final; aqui ele vira desconto */
   let desc0 = ed ? descontoDe(p) : 0;
   const juntar=[];
   const mesmoCliente=()=>{ const n=normNome($("#f-cliente")?.value||p.cliente); if(!n) return [];
-    return S.pedidos.filter(o=>o.id!==p.id&&!juntar.includes(o.id)&&normNome(o.cliente)===n&&o.status!=="cancelado"&&(o.loteId||"")===(p.loteId||"")); };
+    return S.pedidos.filter(o=>o.id!==p.id&&!juntar.includes(o.id)&&normNome(o.cliente)===n&&o.status!=="cancelado"&&(o.loteId||"")===(p.loteId||"")&&!!o.prontaEntrega===pronta); };
   const ent=p.entrega||{};
-  abrirModal(`<h2>${ed?`Pedido ${num(p.numero)||""}`:"Novo pedido"}</h2>
+  abrirModal(`<h2>${ed?`Pedido ${num(p.numero)||""}`:pronta?"Venda do estoque":"Novo pedido"}</h2>
+    ${pronta?`<p class="tip" style="margin:0">Pronta entrega: a camisa já está com você, então este pedido não vai pro lote.</p>`:""}
     <form id="fp" class="sheet" style="padding:0;max-height:none;background:none">
       <div class="fld"><label for="f-cliente">Cliente</label><input id="f-cliente" required value="${esc(p.cliente)}" placeholder="Nome do cliente"></div>
       <div class="fld"><label for="f-contato">WhatsApp ou @</label><input id="f-contato" value="${esc(p.contato)}" placeholder="(64) 9…"></div>
       <div class="fld"><label>Camisas do pedido</label><div id="f-itens" class="itens"></div>
-        <button type="button" class="btn" id="f-add">+ Adicionar outra camisa</button></div>
+        ${pronta?"":`<button type="button" class="btn" id="f-add">+ Adicionar outra camisa</button>`}</div>
       <div id="f-juntar"></div>
       <div class="two">
         <div class="fld"><label for="f-venda">Valor da venda (R$)</label><input id="f-venda" type="number" step="0.01" min="0" value="${desc0?r2(valorPedido(p)):""}" placeholder="igual à tabela"></div>
@@ -881,16 +996,18 @@ function formPedido(p, pre){
   const lerItens=()=>{ document.querySelectorAll("#f-itens .item").forEach((el,i)=>{ const it=itens[i]; if(!it) return;
       it.camisa=el.querySelector('[data-k="camisa"]').value.trim(); it.tipo=el.querySelector('[data-k="tipo"]').value;
       it.tamanho=el.querySelector('[data-k="tamanho"]').value; it.qtd=Math.max(1,parseInt(el.querySelector('[data-k="qtd"]').value)||1);
+      if(it.estoqueId&&!ed) it.qtd=Math.min(it.qtd,Math.max(1,maxEst(it)));
       it.foto=el.querySelector('[data-k="foto"]').value.trim();
       it.extras=Object.keys(EXTRAS).filter(k=>el.querySelector(`[data-x="${k}"]`).checked); }); };
+  const maxEst = it => { const e=S.estoque.find(x=>x.id===it.estoqueId); return e?e.qtd||0:0; };
   const desenharItens=()=>{
     $("#f-itens").innerHTML=itens.map((it,i)=>`<div class="item">
-      <div class="item-top"><b>Camisa ${i+1}</b>${itens.length>1?`<button type="button" class="btn sm danger" data-rm="${i}">Remover</button>`:""}</div>
+      <div class="item-top"><b>Camisa ${i+1}</b>${it.estoqueId?'<span class="pill s-estoque">Do estoque</span>':""}${itens.length>1&&!it.estoqueId?`<button type="button" class="btn sm danger" data-rm="${i}">Remover</button>`:""}</div>
       <input data-k="camisa" aria-label="Camisa ${i+1}" placeholder="Ex.: Flamengo I 2026" value="${esc(it.camisa)}">
       <div class="three">
-        <select data-k="tipo" aria-label="Versão da camisa ${i+1}">${Object.entries(TIPOS).map(([k,T])=>`<option value="${k}" ${k===it.tipo?"selected":""}>${T.nome}</option>`).join("")}</select>
+        <select data-k="tipo" aria-label="Versão da camisa ${i+1}" ${it.estoqueId?"disabled":""}>${Object.entries(TIPOS).map(([k,T])=>`<option value="${k}" ${k===it.tipo?"selected":""}>${T.nome}</option>`).join("")}</select>
         <select data-k="tamanho" aria-label="Tamanho da camisa ${i+1}">${TAMANHOS.map(t=>`<option ${t===it.tamanho?"selected":""}>${t}</option>`).join("")}</select>
-        <input data-k="qtd" type="number" min="1" max="50" value="${it.qtd||1}" aria-label="Quantidade da camisa ${i+1}">
+        <input data-k="qtd" type="number" min="1" max="${it.estoqueId?(ed?it.qtd:maxEst(it)):50}" value="${it.qtd||1}" aria-label="Quantidade da camisa ${i+1}" ${it.estoqueId&&ed?"disabled":""}>
       </div>
       <div class="chips">${Object.entries(EXTRAS).map(([k,E])=>`<label class="chip"><input type="checkbox" data-x="${k}" ${(it.extras||[]).includes(k)?"checked":""}>${E.nome} <span class="muted num">+${brl(E.preco)}</span></label>`).join("")}</div>
       <input data-k="foto" type="url" aria-label="Link da foto da camisa ${i+1}" placeholder="Link da foto (Google Fotos, Drive…) — opcional" value="${esc(it.foto)}">
@@ -919,7 +1036,7 @@ function formPedido(p, pre){
     if(b.dataset.rmpag){ pags.splice(Number(b.dataset.rmpag),1); desenharPags(); calc(); }
     if(b.id==="f-juntar-btn"){ lerItens(); mesmoCliente().forEach(o=>{ itensDe(o).forEach(it=>itens.push({...it,extras:[...(it.extras||[])]})); pagamentosDe(o).forEach(x=>pags.push({...x})); if($("#f-venda").value!==""||descontoDe(o)>0){ const atual=$("#f-venda").value===""?itens.slice(0,itens.length-itensDe(o).length).reduce((a,it)=>a+precoItem(it),0):parseFloat($("#f-venda").value)||0; $("#f-venda").value=r2(atual+valorPedido(o)); } juntar.push(o.id); }); desenharItens(); desenharPags(); desenharJuntar(); calc(); toast("Camisas juntadas. Confira e salve."); }
   });
-  if(ed) $("#f-del").addEventListener("click",()=>{ $("#del-area").innerHTML=`<button type="button" class="btn danger" id="f-del2">Confirmar exclusão</button>`; $("#f-del2").addEventListener("click",async()=>{ if(await apagar("pedidos",p.id)){ fecharModal(); toast("Pedido excluído"); } }); });
+  if(ed) $("#f-del").addEventListener("click",()=>{ $("#del-area").innerHTML=`<button type="button" class="btn danger" id="f-del2">Confirmar exclusão</button>`; $("#f-del2").addEventListener("click",async()=>{ if(pronta&&!p.estoqueDevolvido) await devolverEstoque(p); if(await apagar("pedidos",p.id)){ fecharModal(); toast(pronta?"Pedido excluído. As camisas voltaram pro estoque.":"Pedido excluído"); } }); });
   $("#fp").addEventListener("submit",async e=>{
     e.preventDefault(); lerItens();
     const cliente=$("#f-cliente").value.trim();
@@ -928,7 +1045,7 @@ function formPedido(p, pre){
     const novo=lerPagamentoSeAberto(); if(novo) pags.push(novo);
     const t=totais();
     const data={...(ed?p:{}),cliente,contato:$("#f-contato").value.trim(),
-      itens:itens.map(it=>{ const o={camisa:it.camisa,tipo:it.tipo,tamanho:it.tamanho,extras:it.extras,qtd:it.qtd}; if(it.foto) o.foto=it.foto; if(typeof it.custoUnit==="number") o.custoUnit=it.custoUnit; return o; }),
+      itens:itens.map(it=>{ const o={camisa:it.camisa,tipo:it.tipo,tamanho:it.tamanho,extras:it.extras,qtd:it.qtd}; if(it.foto) o.foto=it.foto; if(typeof it.custoUnit==="number") o.custoUnit=it.custoUnit; if(it.estoqueId) o.estoqueId=it.estoqueId; return o; }),
       desconto:r2(t.ds), motivoDesconto:$("#f-mdesc").value.trim(),
       pagamentos:pags.map(x=>{ return {valor:r2(x.valor),data:x.data||hoje(),forma:x.forma||""}; }),
       entrega:{tipo:$("#f-etipo").value,data:$("#f-edata").value,endereco:$("#f-eend").value.trim(),rastreio:$("#f-erastro").value.trim()},
@@ -936,6 +1053,7 @@ function formPedido(p, pre){
     ["id","deInteressado","camisa","tipo","tamanho","extras","qtd","custoUnit","valor","vendedor"].forEach(k=>delete data[k]);
     const rec=data.pagamentos.reduce((a,x)=>a+x.valor,0);
     if(data.status==="aguardando"&&rec>0&&rec>=Math.max(0,t.tab-t.ds)-0.009) data.status="pago";
+    if(pronta) data.prontaEntrega=true;
     if(!ed){ data.criado=Date.now(); data.numero=proxNumero(); }
     else if(!data.numero) data.numero=proxNumero();
     if(data.status==="encomendado"&&!data.dataEncomenda) data.dataEncomenda=hoje();
@@ -947,6 +1065,8 @@ function formPedido(p, pre){
     data.historico=comHist(ed?p:null,acoes.join(", "));
     const id=ed?p.id:novoId();
     if(await salvar("pedidos",id,data)){
+      if(!ed) for(const it of data.itens.filter(x=>x.estoqueId)){ const e=S.estoque.find(x=>x.id===it.estoqueId); if(!e) continue; const resta=Math.max(0,(e.qtd||0)-it.qtd);
+        await atualizar("estoque",e.id,{qtd:resta,status:resta>0?"disponivel":"esgotado",vendas:[...(e.vendas||[]),{pedidoId:id,numero:data.numero,cliente:data.cliente,qtd:it.qtd,data:hoje()}]}); }
       for(const oid of juntar) await apagar("pedidos",oid);
       if(pre&&pre.deInteressado) await atualizar("interessados",pre.deInteressado,{situacao:"comprou",pedidoId:id});
       fecharModal(); toast(ed?"Pedido salvo":`Pedido ${num(data.numero)} registrado`);
@@ -1034,9 +1154,10 @@ async function baixarBackup(btn){
     const desp=S.despesas.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||"")).map(d=>({"Data":dBR(d.data),"Descrição":d.descricao||"","Categoria":CAT_DESP[d.categoria]||"Outro","Valor (R$)":r2(d.valor)}));
     const lot=S.lotes.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||"")).map(l=>({"Data":dBR(l.data),"Peças":l.pecas,"Custo (R$)":r2(l.custo),"Vendas (R$)":r2(l.receita),"Lucro bruto (R$)":r2(l.lucro)}));
     const inte=S.interessados.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||"")).map(i=>({"Data":dBR(i.data),"Nome":i.nome||"","Contato":i.contato||"","Camisa":i.camisa||"","Situação":{aberto:"Em conversa",comprou:"Comprou",desistiu:"Desistiu"}[i.situacao]||"","Motivo":i.situacao==="desistiu"?(MOTIVOS[i.motivo]||""):"","Observações":i.obs||""}));
+    const estq=S.estoque.slice().sort((a,b)=>(a.camisa||"").localeCompare(b.camisa||"")).map(e=>({"Camisa":e.camisa||"","Versão":TIPOS[e.tipo]?.nome||"","Tamanho":e.tamanho||"","Adicionais":(e.extras||[]).map(x=>EXTRAS[x]?.nome).filter(Boolean).join(", "),"Situação":SIT_EST[e.status]||e.status,"Qtd atual":e.qtd||0,"Qtd comprada":e.qtdInicial??"","Custo cada (R$)":typeof e.custoUnit==="number"?r2(e.custoUnit+custoExtras(e)):"","Vendidas":(e.vendas||[]).reduce((a,v)=>a+v.qtd,0),"Encomendado em":dBR(e.dataEncomenda),"Chegou em":dBR(e.dataChegada)}));
     const wb=X.utils.book_new();
     const add=(nome,rows,vazio)=>{ const r=rows.length?rows:[{[vazio]:""}]; const ws=X.utils.json_to_sheet(r); const cols=Object.keys(r[0]); ws["!cols"]=cols.map(c=>({wch:Math.min(40,Math.max(c.length+2,...r.map(x=>String(x[c]??"").length+1)))})); X.utils.book_append_sheet(wb,ws,nome); };
-    add("Pedidos",ped,"Sem pedidos"); add("Pagamentos",pag,"Sem pagamentos"); add("Clientes",cli,"Sem clientes"); add("Despesas",desp,"Sem despesas"); add("Lotes",lot,"Sem lotes"); add("Interessados",inte,"Sem interessados");
+    add("Pedidos",ped,"Sem pedidos"); add("Pagamentos",pag,"Sem pagamentos"); add("Clientes",cli,"Sem clientes"); add("Despesas",desp,"Sem despesas"); add("Lotes",lot,"Sem lotes"); add("Estoque",estq,"Sem estoque"); add("Interessados",inte,"Sem interessados");
     X.writeFile(wb,`kabide10-backup-${hoje()}.xlsx`);
     toast("Backup baixado");
   }catch(e){ toast("Não deu pra gerar a planilha. Confira a internet e tente de novo."); }
