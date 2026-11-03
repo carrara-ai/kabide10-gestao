@@ -115,7 +115,7 @@ tr.cur td{color:var(--accent);font-weight:600}
 .fld input,.fld select,.fld textarea{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;width:100%;min-width:0}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
-.chip{display:flex;gap:6px;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:99px;padding:6px 10px;font-size:13px;cursor:pointer}
+.chip{white-space:nowrap;display:flex;gap:6px;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:99px;padding:6px 10px;font-size:13px;cursor:pointer}
 .chip input{accent-color:var(--accent);margin:0}
 .itens{display:grid;gap:10px;margin-bottom:8px}
 .item{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;display:grid;gap:8px}
@@ -640,7 +640,76 @@ function rEstoque(){
     ${bloco("No próximo lote",plan,"Nenhuma camisa de estoque esperando encomenda.")}
     ${esg.length?`<details class="box"><summary>Esgotadas (${esg.length})</summary><div class="list" style="margin-top:10px">${ord(esg).map(linhaEst).join("")}</div></details>`:""}`}`;
 }
+/* várias camisas de uma vez: uma linha por modelo e tamanho */
+function formEstoqueVarios(sitInicial){
+  let linhas=[{camisa:"",tipo:"torcedor",tamanho:"G",qtd:1,extras:[]}];
+  abrirModal(`<h2>Camisas pro estoque</h2>
+    <p class="tip" style="margin:0">Uma linha por modelo e tamanho. Use <b>Duplicar</b> pra repetir a camisa e só trocar o tamanho.</p>
+    <form id="fev" class="sheet" style="padding:0;max-height:none;background:none">
+      <div id="ev-linhas" class="itens"></div>
+      <button type="button" class="btn" id="ev-add">+ Adicionar outra camisa</button>
+      <div class="fld"><label for="ev-sit">Situação de todas</label><select id="ev-sit">${["planejado","encomendado","disponivel"].map(k=>`<option value="${k}" ${k===(sitInicial||"planejado")?"selected":""}>${SIT_EST[k]}</option>`).join("")}</select></div>
+      <p class="tip" id="ev-dica" style="margin:0"></p>
+      <div class="calc" id="ev-calc"></div>
+      <div class="sheet-acts"><span></span><span class="toolbar"><button type="button" class="btn" data-close>Cancelar</button><button class="btn pri" type="submit" id="ev-ok">Salvar</button></span></div>
+    </form>`);
+  const ler=()=>{ document.querySelectorAll("#ev-linhas .item").forEach((el,i)=>{ const l=linhas[i]; if(!l) return;
+    l.camisa=el.querySelector('[data-k="camisa"]').value.trim(); l.tipo=el.querySelector('[data-k="tipo"]').value; l.tamanho=el.querySelector('[data-k="tamanho"]').value;
+    l.qtd=Math.max(1,parseInt(el.querySelector('[data-k="qtd"]').value)||1); l.custo=el.querySelector('[data-k="custo"]').value;
+    l.extras=Object.keys(EXTRAS).filter(k=>el.querySelector(`[data-x="${k}"]`).checked); }); };
+  const desenhar=()=>{ const sit=$("#ev-sit").value;
+    $("#ev-linhas").innerHTML=linhas.map((l,i)=>`<div class="item">
+      <div class="item-top"><b>Camisa ${i+1}</b><span class="toolbar"><button type="button" class="btn sm" data-dup="${i}">Duplicar</button>${linhas.length>1?`<button type="button" class="btn sm danger" data-rml="${i}">Remover</button>`:""}</span></div>
+      <input data-k="camisa" aria-label="Camisa ${i+1}" placeholder="Ex.: Brasil I 2026" value="${esc(l.camisa)}">
+      <div class="three">
+        <select data-k="tipo" aria-label="Versão da linha ${i+1}">${Object.entries(TIPOS).map(([k,T])=>`<option value="${k}" ${k===l.tipo?"selected":""}>${T.nome}</option>`).join("")}</select>
+        <select data-k="tamanho" aria-label="Tamanho da linha ${i+1}">${TAMANHOS.map(t=>`<option ${t===l.tamanho?"selected":""}>${t}</option>`).join("")}</select>
+        <input data-k="qtd" type="number" min="1" max="99" value="${l.qtd}" aria-label="Quantidade da linha ${i+1}">
+      </div>
+      <div class="chips">${Object.entries(EXTRAS).map(([k,E])=>`<label class="chip"><input type="checkbox" data-x="${k}" ${(l.extras||[]).includes(k)?"checked":""}>${E.nome}</label>`).join("")}</div>
+      <input data-k="custo" type="number" step="0.01" min="0" aria-label="Custo de cada, linha ${i+1}" placeholder="Custo de cada (vazio = tabela do fornecedor)" value="${esc(l.custo||"")}" ${sit==="planejado"?"hidden":""}>
+    </div>`).join(""); };
+  const calc=()=>{ ler(); const sit=$("#ev-sit").value, n=linhas.reduce((a,l)=>a+l.qtd,0);
+    $("#ev-dica").innerHTML = sit==="planejado" ? "Vão aparecer na aba <b>Lotes</b> e entram no próximo pedido ao fornecedor, junto com os pedidos de clientes."
+      : sit==="encomendado" ? "Já encomendou por fora. Quando chegarem, mude pra <b>Comigo</b> em cada uma." : "Já estão com você, prontas pra vender.";
+    let custo;
+    if(sit==="planejado"){ const r=resumoLote(filaLote(),[...estPlanejado(),...linhas]), r0=resumoLote(filaLote(),estPlanejado()); custo=r.custoEst-r0.custoEst; }
+    else custo=linhas.reduce((a,l)=>a+((parseFloat(l.custo)>0?parseFloat(l.custo):custoUnit(l.tipo,1))+custoExtras(l))*l.qtd,0);
+    const venda=linhas.reduce((a,l)=>a+precoPeca(l)*l.qtd,0);
+    $("#ev-calc").innerHTML=`<div><b>${n} camisa${n>1?"s":""} em ${linhas.length} linha${linhas.length>1?"s":""}</b><span></span></div><div><span>Custo estimado${sit==="planejado"?" (já com o desconto do lote)":""}</span><span class="num">${brl(custo)}</span></div><div><span>Vale vendendo pela tabela</span><span class="num">${brl(venda)}</span></div>`;
+    $("#ev-ok").textContent=`Salvar ${n} camisa${n>1?"s":""}`; };
+  desenhar(); calc();
+  const f=$("#fev");
+  f.addEventListener("input",calc);
+  f.addEventListener("change",e=>{ const el=e.target;
+    if(el.dataset.k==="tipo"&&el.value==="infantil") el.closest(".item").querySelector('[data-k="tamanho"]').value="Infantil";
+    if(el.dataset.k==="tamanho") el.closest(".item").querySelector('[data-x="xg"]').checked = el.value==="XG";
+    if(el.id==="ev-sit"){ ler(); desenhar(); }
+    calc(); });
+  f.addEventListener("click",e=>{ const b=e.target.closest("button"); if(!b) return;
+    if(b.id==="ev-add"){ ler(); const u=linhas[linhas.length-1]; linhas.push({camisa:"",tipo:u.tipo,tamanho:u.tamanho,qtd:1,extras:[]}); desenhar(); calc(); const ins=document.querySelectorAll('#ev-linhas [data-k="camisa"]'); ins[ins.length-1].focus(); }
+    if(b.dataset.dup){ ler(); const i=Number(b.dataset.dup), c={...linhas[i],extras:[...linhas[i].extras]}; const ord=TAMANHOS.indexOf(c.tamanho); if(ord>=0&&ord<TAMANHOS.length-2) c.tamanho=TAMANHOS[ord+1]; linhas.splice(i+1,0,c); desenhar(); calc(); }
+    if(b.dataset.rml){ ler(); linhas.splice(Number(b.dataset.rml),1); desenhar(); calc(); }
+  });
+  f.addEventListener("submit",async ev=>{
+    ev.preventDefault(); ler();
+    if(linhas.some(l=>!l.camisa)){ toast("Preencha o nome da camisa em todas as linhas."); return; }
+    const sit=$("#ev-sit").value, btn=$("#ev-ok"); btn.disabled=true;
+    let ok=0;
+    for(const l of linhas){
+      const data={camisa:l.camisa,tipo:l.tipo,tamanho:l.tamanho,qtd:l.qtd,qtdInicial:l.qtd,extras:l.extras,status:sit,obs:"",vendas:[],criado:Date.now(),por:USER};
+      if(sit!=="planejado") data.custoUnit = parseFloat(l.custo)>0 ? r2(parseFloat(l.custo)) : custoUnit(l.tipo,1);
+      if(sit==="encomendado") data.dataEncomenda=hoje();
+      if(sit==="disponivel") data.dataChegada=hoje();
+      if(await salvar("estoque",novoId(),data)) ok++; else break;
+    }
+    if(ok===linhas.length){ fecharModal(); toast(`${linhas.reduce((a,l)=>a+l.qtd,0)} camisas ${sit==="planejado"?"no próximo lote":"no estoque"}`); }
+    else { btn.disabled=false; toast(`Salvei ${ok} de ${linhas.length} linhas. Confira o estoque e tente as que faltaram.`); }
+  });
+  $('#ev-linhas [data-k="camisa"]').focus();
+}
 function formEstoque(e, sitInicial){
+  if(!e) return formEstoqueVarios(sitInicial);
   const ed=!!e; e=e||{tipo:"torcedor",tamanho:"G",extras:[],qtd:1,status:sitInicial||"planejado"};
   const travado=ed&&e.status!=="planejado"; // já foi encomendado: custo do lote travado
   abrirModal(`<h2>${ed?"Camisa do estoque":"Camisas pro estoque"}</h2>
